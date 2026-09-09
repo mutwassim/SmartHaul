@@ -1,0 +1,653 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS (SRS Appendix C)
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  CARGO_OWNER
+  DRIVER
+  FLEET_OWNER
+  ADMIN
+}
+
+enum AccountStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  ACTIVE
+  SUSPENDED
+}
+
+enum PreferredLanguage {
+  EN
+  UR
+}
+
+enum DocumentType {
+  CNIC_FRONT
+  CNIC_BACK
+  DRIVING_LICENCE
+  VEHICLE_REGISTRATION
+  BUSINESS_REGISTRATION
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum VehicleType {
+  OPEN_BODY
+  MAZDA_MGV
+  HEAVY_SIX_WHEELER
+  HEAVY_TEN_TWELVE_WHEELER
+  TRAILER_FLATBED
+  CONTAINER_MOUNTED
+  REFRIGERATED
+  TANKER
+  DUMPER
+}
+
+enum VehicleAvailability {
+  AVAILABLE
+  ASSIGNED
+  INACTIVE
+  UNDER_MAINTENANCE
+}
+
+enum ShipmentStatus {
+  PENDING
+  BOOKED
+  REACHED_PICKUP
+  CARGO_LOADED
+  IN_TRANSIT
+  REACHED_DESTINATION
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum BidStatus {
+  ACTIVE
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+enum ComplaintCategory {
+  PAYMENT_DISPUTE
+  NON_DELIVERY
+  DAMAGED_OR_MISSING_CARGO
+  DELAY
+  CARGO_MISDESCRIPTION
+  LOADING_UNLOADING_DELAY
+  CONDUCT
+  CANCELLATION_DISPUTE
+  TRACKING_OR_APPLICATION_FAULT
+  OTHER
+}
+
+enum ComplaintStatus {
+  PENDING
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum NotificationType {
+  REGISTRATION_CONFIRMED
+  VERIFICATION_OUTCOME
+  NEW_MATCHING_SHIPMENT
+  NEW_BID_RECEIVED
+  BID_ACCEPTED
+  SHIPMENT_BOOKED_BY_ANOTHER
+  TRIP_STATUS_CHANGED
+  TRACKING_UNAVAILABLE_OR_RESUMED
+  PROOF_OF_DELIVERY_UPLOADED
+  DELIVERY_CONFIRMED
+  PAYMENT_STATUS_CHANGED
+  COMPLAINT_RECEIVED
+  COMPLAINT_STATUS_CHANGED
+  ACCOUNT_SUSPENDED_OR_REINSTATED
+  PLATFORM_ANNOUNCEMENT
+}
+
+enum AuthAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_SUCCESS
+  ACCOUNT_LOCKED
+}
+
+// -----------------------------------------------------------------------------
+// MODELS (SRS Appendix B & Business Rules)
+// -----------------------------------------------------------------------------
+
+model User {
+  id                 String            @id @default(uuid())
+  role               UserRole
+  name               String
+  phone              String
+  email              String
+  passwordHash       String
+  accountStatus      AccountStatus     @default(PENDING)
+  
+  // Sensitive identifiers encrypted with AES-256 (SEC-7, CON-12)
+  cnicEncrypted      String?
+  cnicIv             String?
+  cnicTag            String?
+  cnicHash           String?           // Deterministic SHA-256 hash for unique checking (BR-2)
+  
+  businessName       String?
+  businessAddress    String?
+  serviceArea        String[]          @default([]) // Operating regions/cities
+  preferredLanguage  PreferredLanguage @default(EN)
+  
+  avgRating           Float             @default(0.0)
+  totalRatings        Int               @default(0)
+  completedTripsCount Int               @default(0)
+  
+  failedLoginAttempts Int               @default(0)
+  lockoutUntil        DateTime?
+  lastLoginAt         DateTime?
+  
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  
+  // Relations
+  documents           VerificationDocument[]
+  savedLocations      SavedLocation[]
+  
+  // Cargo Owner relations
+  shipmentsCreated    Shipment[]         @relation("CargoOwnerShipments")
+  ratingsGiven        Rating[]           @relation("RatingsGiven")
+  ratingsReceived     Rating[]           @relation("RatingsReceived")
+  
+  // Driver relations
+  driverTrips         Trip[]             @relation("DriverTrips")
+  driverVehicle       Vehicle?           @relation("DriverDefaultVehicle")
+  proofsOfDelivery    ProofOfDelivery[]  @relation("DriverPODs")
+  
+  // Fleet Owner relations
+  fleetVehicles       Vehicle[]          @relation("FleetVehicles")
+  fleetDrivers        DriverFleetLink[]  @relation("FleetOwnerDrivers")
+  driverFleetLink     DriverFleetLink?   @relation("DriverFleetLink")
+  
+  // Common relations
+  bids                Bid[]              @relation("UserBids")
+  sentMessages        ShipmentMessage[]  @relation("SentMessages")
+  receivedMessages    ShipmentMessage[]  @relation("ReceivedMessages")
+  notifications       Notification[]     @relation("UserNotifications")
+  deviceTokens        DeviceToken[]
+  complaintsRaised    Complaint[]        @relation("ComplaintsRaised")
+  complaintsAgainst   Complaint[]        @relation("ComplaintsAgainst")
+  paymentStatusLogs   PaymentStatusLog[] @relation("PaymentStatusChanger")
+  tripStatusLogs      TripStatusLog[]    @relation("TripStatusChanger")
+  
+  // Admin relations
+  adminAuditLogs      AdminAuditLog[]    @relation("AdminActions")
+  verifiedDocuments   VerificationDocument[] @relation("AdminVerifiedDocuments")
+  resolvedComplaints  Complaint[]        @relation("AdminResolvedComplaints")
+  
+  // Auth logs & password resets
+  authLogs            AuthLog[]
+  passwordResets      PasswordResetToken[]
+
+  @@unique([phone, role], name: "unique_phone_per_role")
+  @@unique([email, role], name: "unique_email_per_role")
+  @@index([role, accountStatus])
+  @@index([cnicHash])
+}
+
+model DriverFleetLink {
+  id           String     @id @default(uuid())
+  fleetOwnerId String
+  driverId     String     @unique
+  fleetOwner   User       @relation("FleetOwnerDrivers", fields: [fleetOwnerId], references: [id], onDelete: Cascade)
+  driver       User       @relation("DriverFleetLink", fields: [driverId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@index([fleetOwnerId])
+}
+
+model VerificationDocument {
+  id                 String             @id @default(uuid())
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentType       DocumentType
+  storageKey         String             // Object store key (SEC-8, SI-4.1)
+  originalFilename   String?
+  mimeType           String             // image/jpeg or image/png (SI-4.3)
+  fileSizeBytes      Int
+  expiryDate         DateTime?          // For license/vehicle registration monitoring (BR-29, FR-SV-15)
+  verificationStatus VerificationStatus @default(PENDING)
+  rejectionReason    String?
+  verifiedByAdminId  String?
+  verifiedByAdmin    User?              @relation("AdminVerifiedDocuments", fields: [verifiedByAdminId], references: [id])
+  verifiedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([verificationStatus])
+  @@index([expiryDate])
+}
+
+model SavedLocation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String   // e.g. "Main Warehouse Lahore"
+  address   String
+  latitude  Float
+  longitude Float
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Vehicle {
+  id                         String              @id @default(uuid())
+  ownerId                    String
+  owner                      User                @relation("FleetVehicles", fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  // Registration encrypted with AES-256 (SEC-7, CON-12)
+  registrationNumberEncrypted String
+  registrationNumberIv        String
+  registrationNumberTag       String
+  registrationNumberHash      String              @unique // Unique across entire platform (BR-30)
+  
+  vehicleType                VehicleType
+  ratedCapacity              Float               // Capacity in metric tonnes (BR-4)
+  model                      String
+  year                       Int
+  availabilityStatus         VehicleAvailability @default(AVAILABLE)
+  
+  defaultDriverId            String?             @unique
+  defaultDriver              User?               @relation("DriverDefaultVehicle", fields: [defaultDriverId], references: [id])
+  
+  registrationDocKey         String?             // Object storage reference
+  registrationDocExpiry      DateTime?
+  
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  
+  trips                      Trip[]
+
+  @@index([ownerId])
+  @@index([vehicleType, availabilityStatus])
+}
+
+model Shipment {
+  id                   String           @id @default(uuid())
+  shipmentNumber       String           @unique // e.g. "SH-2026-10001"
+  cargoOwnerId         String
+  cargoOwner           User             @relation("CargoOwnerShipments", fields: [cargoOwnerId], references: [id], onDelete: Restrict)
+  
+  pickupAddress        String
+  pickupLat            Float
+  pickupLng            Float
+  pickupContactName    String?
+  pickupContactPhone   String?
+  
+  dropoffAddress       String
+  dropoffLat           Float
+  dropoffLng           Float
+  dropoffContactName   String?
+  dropoffContactPhone  String?
+  
+  cargoType            String
+  cargoWeight          Float            // in metric tonnes
+  cargoDimensions      String?          // e.g. "12x4x4 m" or JSON
+  requiredVehicleType  VehicleType
+  expectedDeliveryDate DateTime         // Must be >= createdAt (BR-6)
+  
+  // OSRM routing cache (SI-2.3)
+  distanceKm           Float
+  durationMinutes      Float
+  routePolyline        String?          @db.Text
+  isDistanceApproximate Boolean         @default(false)
+  
+  status               ShipmentStatus   @default(PENDING)
+  isDraft              Boolean          @default(false)
+  
+  cancellationReason   String?
+  cancelledById        String?
+  completedAt          DateTime?
+  autoCompletedAt      DateTime?        // 72-hour auto-completion timestamp (BR-20)
+  
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  
+  // Relations
+  bids                 Bid[]
+  trip                 Trip?
+  proofOfDelivery      ProofOfDelivery?
+  paymentRecord        PaymentRecord?
+  complaints           Complaint[]
+  messages             ShipmentMessage[]
+  ratings              Rating[]
+  recommendationLogs   RecommendationLog[]
+
+  @@index([status, requiredVehicleType])
+  @@index([cargoOwnerId])
+  @@index([createdAt])
+}
+
+model Bid {
+  id                    String      @id @default(uuid())
+  shipmentId            String
+  shipment              Shipment    @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  bidderId              String
+  bidder                User        @relation("UserBids", fields: [bidderId], references: [id], onDelete: Cascade)
+  
+  offeredVehicleType    VehicleType
+  proposedFare          Float       // PKR
+  estimatedDeliveryTime DateTime
+  status                BidStatus   @default(ACTIVE)
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@index([shipmentId, status])
+  @@index([bidderId])
+}
+
+model Trip {
+  id               String          @id @default(uuid())
+  shipmentId       String          @unique
+  shipment         Shipment        @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  
+  driverId         String
+  driver           User            @relation("DriverTrips", fields: [driverId], references: [id], onDelete: Restrict)
+  
+  vehicleId        String
+  vehicle          Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  
+  fleetOwnerId     String?
+  agreedFare       Float           // Immutable agreed fare locked at booking (BR-23)
+  
+  startedAt        DateTime?
+  completedAt      DateTime?
+  totalDistanceKm  Float?
+  loadedDistanceKm Float?
+  
+  // Tracking state watchdog (FR-RT-11)
+  isTrackingActive Boolean         @default(false)
+  lastPositionAt   DateTime?
+  isInterrupted    Boolean         @default(false)
+  
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  
+  statusLogs       TripStatusLog[]
+  positions        TripPosition[]
+
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([fleetOwnerId])
+  @@index([isTrackingActive, lastPositionAt])
+}
+
+model TripStatusLog {
+  id          String         @id @default(uuid())
+  tripId      String
+  trip        Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  status      ShipmentStatus
+  changedById String
+  changedBy   User           @relation("TripStatusChanger", fields: [changedById], references: [id])
+  timestamp   DateTime       // Preserved original device timestamp for offline sync (REL-6, FR-DR-15)
+  note        String?
+  createdAt   DateTime       @default(now())
+
+  @@index([tripId, timestamp])
+}
+
+model TripPosition {
+  id         String   @id @default(uuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  driverId   String
+  latitude   Float
+  longitude  Float
+  accuracy   Float    // Horizontal accuracy in meters (<=100m enforced by HI-3)
+  recordedAt DateTime // Original timestamp from device GPS
+  createdAt  DateTime @default(now())
+
+  @@index([tripId, recordedAt])
+  @@index([createdAt]) // For 90-day retention pruning (BR-17, SEC-14)
+}
+
+model ProofOfDelivery {
+  id          String   @id @default(uuid())
+  shipmentId  String   @unique
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  driverId    String
+  driver      User     @relation("DriverPODs", fields: [driverId], references: [id])
+  
+  imageKeys   String[] // 1 to 5 image keys in object storage (BR-18, SI-4.1)
+  note        String?
+  captureLat  Float?
+  captureLng  Float?
+  uploadedAt  DateTime @default(now())
+
+  @@index([shipmentId])
+}
+
+model PaymentRecord {
+  id             String             @id @default(uuid())
+  shipmentId     String             @unique
+  shipment       Shipment           @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  cargoOwnerId   String
+  driverId       String?
+  fleetOwnerId   String?
+  
+  agreedFare     Float              // Locked at bid acceptance. Alterable only by Admin resolving dispute (BR-23, FR-AD-16)
+  amountReceived Float              @default(0.0)
+  status         PaymentStatus      @default(PENDING)
+  isFrozen       Boolean            @default(false) // Frozen while payment dispute is open (BR-25, FR-PM-8)
+  
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  
+  statusLogs     PaymentStatusLog[]
+
+  @@index([cargoOwnerId])
+  @@index([driverId])
+  @@index([fleetOwnerId])
+  @@index([status])
+}
+
+model PaymentStatusLog {
+  id              String        @id @default(uuid())
+  paymentRecordId String
+  paymentRecord   PaymentRecord @relation(fields: [paymentRecordId], references: [id], onDelete: Cascade)
+  previousStatus  PaymentStatus
+  newStatus       PaymentStatus
+  amountReceived  Float
+  changedById     String
+  changedBy       User          @relation("PaymentStatusChanger", fields: [changedById], references: [id])
+  note            String?
+  timestamp       DateTime      @default(now())
+
+  @@index([paymentRecordId])
+}
+
+model Complaint {
+  id                 String            @id @default(uuid())
+  referenceCode      String            @unique // e.g. "CMP-2026-0001"
+  shipmentId         String
+  shipment           Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  
+  submitterId        String
+  submitter          User              @relation("ComplaintsRaised", fields: [submitterId], references: [id])
+  
+  counterpartyId     String?
+  counterparty       User?             @relation("ComplaintsAgainst", fields: [counterpartyId], references: [id])
+  
+  category           ComplaintCategory // 10 categories (Table C-4)
+  description        String            @db.Text
+  attachmentKeys     String[]          @default([]) // Up to 3 images (FR-CO-25)
+  status             ComplaintStatus   @default(PENDING)
+  
+  adminRemarks       String?           @db.Text
+  resolvedByAdminId  String?
+  resolvedByAdmin    User?             @relation("AdminResolvedComplaints", fields: [resolvedByAdminId], references: [id])
+  resolvedAt         DateTime?
+  
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([status])
+  @@index([shipmentId])
+  @@index([submitterId])
+}
+
+model Rating {
+  id         String   @id @default(uuid())
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  
+  fromUserId String
+  fromUser   User     @relation("RatingsGiven", fields: [fromUserId], references: [id])
+  
+  toUserId   String
+  toUser     User     @relation("RatingsReceived", fields: [toUserId], references: [id])
+  
+  score      Int      // 1 to 5 (BR-21)
+  review     String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@unique([shipmentId, fromUserId], name: "unique_rating_per_party_per_shipment")
+  @@index([toUserId])
+}
+
+model ShipmentMessage {
+  id          String   @id @default(uuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  
+  senderId    String
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id])
+  
+  recipientId String
+  recipient   User     @relation("ReceivedMessages", fields: [recipientId], references: [id])
+  
+  content     String   @db.Text
+  isRead      Boolean  @default(false)
+  sentAt      DateTime @default(now())
+
+  @@index([shipmentId, sentAt])
+}
+
+model Notification {
+  id                String           @id @default(uuid())
+  recipientId       String
+  recipient         User             @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  
+  type              NotificationType // 15 types from Table C-7
+  title             String
+  message           String           @db.Text
+  relatedShipmentId String?
+  
+  isPushDelivered   Boolean          @default(false)
+  pushFailureReason String?
+  isRead            Boolean          @default(false)
+  readAt            DateTime?
+  
+  createdAt         DateTime         @default(now())
+
+  @@index([recipientId, isRead])
+  @@index([createdAt])
+}
+
+model DeviceToken {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  platform    String   // "android" | "ios" | "web"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model AdminAuditLog {
+  id           String   @id @default(uuid())
+  adminId      String
+  admin        User     @relation("AdminActions", fields: [adminId], references: [id])
+  
+  action       String   // e.g. "APPROVE_VERIFICATION", "SUSPEND_USER", "RESOLVE_DISPUTE", "UPDATE_FARE"
+  targetType   String   // "USER", "SHIPMENT", "PAYMENT", "COMPLAINT"
+  targetId     String
+  previousState Json?
+  newState     Json?
+  reason       String?  @db.Text
+  ipAddress    String?
+  timestamp    DateTime @default(now())
+
+  @@index([adminId])
+  @@index([targetType, targetId])
+  @@index([timestamp])
+}
+
+model AuthLog {
+  id         String     @id @default(uuid())
+  userId     String?
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  identifier String     // email or phone attempted
+  action     AuthAction
+  ipAddress  String
+  userAgent  String?
+  timestamp  DateTime   @default(now())
+
+  @@index([identifier, timestamp])
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([token])
+}
+
+model RecommendationLog {
+  id           String   @id @default(uuid())
+  shipmentId   String
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  candidateId  String   // Driver ID or Fleet Vehicle ID
+  matchScore   Float
+  matchReasons String[]
+  isReturnLoad Boolean  @default(false)
+  isSharedLoad Boolean  @default(false)
+  computedAt   DateTime @default(now())
+
+  @@index([shipmentId])
+}

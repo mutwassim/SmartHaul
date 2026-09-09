@@ -1,0 +1,51 @@
+{
+  "name": "smarthaul-backend",
+  "version": "1.0.0",
+  "description": "SmartHaul Digital Freight Logistics Platform API Backend",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "node prisma/seed.js",
+    "prisma:studio": "prisma studio",
+    "test": "jest --runInBand --detectOpenHandles"
+  },
+  "keywords": [
+    "logistics",
+    "freight",
+    "freight-matching",
+    "express",
+    "prisma",
+    "postgresql",
+    "websockets"
+  ],
+  "author": "Mutwassim Haider, Abdul Basit, Aashir Raja",
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^6.4.1",
+    "axios": "^1.7.9",
+    "bcryptjs": "^3.0.2",
+    "compression": "^1.8.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "pdfkit": "^0.16.0",
+    "winston": "^3.17.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "prisma": "^6.4.1",
+    "supertest": "^7.0.0"
+  }
+}

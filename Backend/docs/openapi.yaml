@@ -1,0 +1,208 @@
+openapi: 3.0.3
+info:
+  title: SmartHaul API Specification
+  description: Digital Freight Logistics Platform API Backend conforming to SRS v1.0 (Revised)
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local Development Server
+
+paths:
+  /health:
+    get:
+      summary: Health Check
+      responses:
+        '200':
+          description: API is operational
+
+  /auth/register:
+    post:
+      summary: Self-register as Cargo Owner, Driver, or Fleet Owner (FR-SV-1)
+      description: Admin self-registration is strictly prohibited (FR-AD-4).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, name, phone, email, password]
+              properties:
+                role:
+                  type: string
+                  enum: [CARGO_OWNER, DRIVER, FLEET_OWNER]
+                name:
+                  type: string
+                phone:
+                  type: string
+                  example: "+923001234567"
+                email:
+                  type: string
+                  example: "user@example.com"
+                password:
+                  type: string
+                  example: "StrongPass@2026"
+                cnicNumber:
+                  type: string
+                  example: "37405-1234567-1"
+                businessName:
+                  type: string
+                preferredLanguage:
+                  type: string
+                  enum: [EN, UR]
+      responses:
+        '201':
+          description: User registered successfully
+        '403':
+          description: Admin self-registration prohibited
+        '409':
+          description: Phone, email, or CNIC collision
+
+  /auth/login:
+    post:
+      summary: Authenticate user with lockout protection (SEC-5, FR-SV-2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password, role]
+              properties:
+                identifier:
+                  type: string
+                  example: "cargo@smarthaul.pk"
+                password:
+                  type: string
+                role:
+                  type: string
+                  enum: [CARGO_OWNER, DRIVER, FLEET_OWNER, ADMIN]
+                deviceToken:
+                  type: string
+      responses:
+        '200':
+          description: Login successful, returns JWT token
+        '401':
+          description: Invalid credentials
+        '423':
+          description: Account locked due to repeated failed logins (SEC-5)
+
+  /shipments/preview-route:
+    post:
+      summary: Calculate route, road distance, and duration via OSRM (FR-CO-5, SI-2.1)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pickupLat, pickupLng, dropoffLat, dropoffLng]
+              properties:
+                pickupLat: { type: number }
+                pickupLng: { type: number }
+                dropoffLat: { type: number }
+                dropoffLng: { type: number }
+      responses:
+        '200':
+          description: Route distance and geometry calculated
+
+  /shipments:
+    post:
+      summary: Create shipment request (FR-CO-3, BR-4, BR-6)
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Shipment created
+    get:
+      summary: List user's shipments (FR-CO-27, SI-1.5)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of shipments
+
+  /shipments/{id}/accept-bid:
+    post:
+      summary: Accept exactly one bid in an atomic transaction (FR-CO-13, REL-4, REL-5, BR-10)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bidId]
+              properties:
+                bidId: { type: string }
+      responses:
+        '200':
+          description: Bid accepted, shipment booked, and payment record created
+
+  /driver/matched-shipments:
+    get:
+      summary: Get matched shipment requests for verified driver (FR-DR-4, BR-3)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of matched shipments
+
+  /driver/bids:
+    post:
+      summary: Submit bid on open shipment (FR-DR-7, BR-7, BR-9)
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Bid placed
+
+  /driver/trips/{id}/status:
+    post:
+      summary: Advance trip along strict lifecycle (FR-DR-12, FR-DR-14, BR-14, BR-15)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Trip status advanced
+
+  /driver/trips/{id}/proof-of-delivery:
+    post:
+      summary: Upload 1 to 5 Proof of Delivery photos (FR-DR-18, BR-18, BR-19)
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: POD uploaded
+
+  /admin/verification-queue:
+    get:
+      summary: Pending driver & fleet document verification queue (FR-AD-5)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Verification queue
+
+  /admin/verification/{id}/decision:
+    post:
+      summary: Approve or reject verification with immutable audit logging (FR-AD-7, BR-28, SEC-15)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Verification decision processed
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
