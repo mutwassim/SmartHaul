@@ -1,14 +1,17 @@
-name: Backend CI
+name: SmartHaul CI/CD
 
 on:
   push:
     branches: [main]
-    paths: ['Backend/**', '.github/workflows/backend-ci.yml']
   pull_request:
-    paths: ['Backend/**', '.github/workflows/backend-ci.yml']
+    branches: [main]
 
 jobs:
+  # ==========================================
+  # 1. CI Stage: Automated Tests & Verification
+  # ==========================================
   test:
+    name: Run Backend Tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,7 +50,6 @@ jobs:
 
       - run: npx prisma generate
 
-      # Apply committed migrations; falls back to pushing the schema until the first migration is committed (DEF-15)
       - name: Create database schema
         run: |
           if [ -d prisma/migrations ]; then
@@ -59,3 +61,48 @@ jobs:
       - run: npm run prisma:seed
 
       - run: npm test
+
+  # ==========================================
+  # 2. CD Stage: Automated Deployment to GCP VM
+  # ==========================================
+  deploy:
+    name: Deploy to Production
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to GCP VM via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script_stop: true
+          script: |
+            echo "🚀 Starting SmartHaul Production Deployment..."
+            cd /www/wwwroot/smarthaul.softezm.com/SmartHaul
+
+            echo "📥 Pulling latest changes from main branch..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "📦 Updating Backend..."
+            cd Backend
+            npm ci
+            npx prisma generate
+            if [ -d prisma/migrations ]; then
+              npx prisma migrate deploy
+            else
+              npx prisma db push --skip-generate
+            fi
+            pm2 restart smarthaul-backend --update-env
+
+            echo "🌐 Updating Next.js Website..."
+            cd ../Website
+            npm ci
+            npm run build
+            pm2 restart smarthaul-web --update-env
+
+            echo "🎉 SmartHaul successfully deployed!"
