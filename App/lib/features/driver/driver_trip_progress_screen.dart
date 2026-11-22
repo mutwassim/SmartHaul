@@ -6,6 +6,7 @@ import '../../common/widgets/error_banner.dart';
 import '../../common/widgets/smart_haul_app_bar.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/localization/app_localizations.dart';
+import '../../core/services/navigation_launcher.dart';
 import '../../core/state/driver_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_shapes.dart';
@@ -105,6 +106,20 @@ class DriverTripProgressScreen extends StatelessWidget {
                             },
                       child: Text(l10n.translate(_nextLabelKey[next]!)),
                     ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.navigation),
+                    label: Text(l10n.translate(trip.status == ShipmentStatus.assigned ? 'navigateToPickup' : 'navigateToDropoff')),
+                    onPressed: () async {
+                      final toPickup = trip.status == ShipmentStatus.assigned;
+                      final messenger = ScaffoldMessenger.of(context);
+                      final opened = await NavigationLauncher.open(
+                        toPickup ? trip.pickupLat : trip.dropoffLat,
+                        toPickup ? trip.pickupLng : trip.dropoffLng,
+                      );
+                      if (!opened) messenger.showSnackBar(SnackBar(content: Text(l10n.translate('mapAppUnavailable'))));
+                    },
+                  ),
                   if (driver.canCancel)
                     TextButton(onPressed: driver.isLoading ? null : () => _cancel(context), child: Text(l10n.translate('cancelTrip'))),
                 ],

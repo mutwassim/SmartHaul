@@ -691,6 +691,7 @@ describe('SmartHaul Core E2E & Business Rule Integration Tests', () => {
     test('publishing notifies eligible drivers and the feed returns the ranked list (C-01)', async () => {
       const driver = (await prisma.user.findFirst({ where: { email: 'testdriver4@haul.pk' } }));
       await prisma.vehicle.updateMany({ where: { ownerId: driver.id }, data: { availabilityStatus: 'AVAILABLE' } });
+      await prisma.user.update({ where: { id: driver.id }, data: { isAcceptingBids: true } });
       const login = await request(app).post('/api/v1/auth/login').send({ identifier: 'testdriver4@haul.pk', password: 'DriverPass@2026!', role: 'DRIVER' });
       const token = login.body.data.token;
 

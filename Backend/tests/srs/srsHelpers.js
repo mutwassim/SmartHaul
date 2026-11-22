@@ -73,6 +73,8 @@ async function verifiedDriver(tag = 'driver') {
   const d = await register('DRIVER', tag);
   await verify(d);
   d.vehicle = await giveVehicle(d.id);
+  // Accepting bids is off by default (FR-DR-19); these drivers have switched it on, as a driver who wants loads would
+  await prisma.user.update({ where: { id: d.id }, data: { isAcceptingBids: true } });
   return d;
 }
 

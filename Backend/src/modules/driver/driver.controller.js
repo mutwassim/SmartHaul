@@ -18,6 +18,9 @@ const {
  */
 async function getMatchedShipments(req, res, next) {
   try {
+    // A driver who switched Accepting bids off sees no loads (FR-DR-19)
+    const me = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isAcceptingBids: true } });
+    if (me && me.isAcceptingBids === false) return successResponse(res, [], 'Accepting bids is switched off');
     const shipments = await getMatchedShipmentsForUser(req.user);
     return successResponse(res, shipments, 'Matched shipments retrieved');
   } catch (error) {
@@ -914,7 +917,45 @@ async function answerFleetInvitation(req, res, next, accept) {
 const acceptFleetInvitation = (req, res, next) => answerFleetInvitation(req, res, next, true);
 const declineFleetInvitation = (req, res, next) => answerFleetInvitation(req, res, next, false);
 
+/**
+ * Accepting bids switch (FR-DR-19). Switching off also deletes the stored position (SEC-18).
+ */
+async function setAvailability(req, res, next) {
+  try {
+    const { accepting } = req.body;
+    const data = accepting
+      ? { isAcceptingBids: true }
+      : { isAcceptingBids: false, lastLat: null, lastLng: null, lastLocationAt: null };
+    await prisma.user.update({ where: { id: req.user.id }, data });
+    return successResponse(res, { isAcceptingBids: accepting }, accepting ? 'Accepting bids' : 'Not accepting bids');
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Latest position of a driver who is accepting bids (FR-DR-19). Only the latest position is kept.
+ */
+async function reportLivePosition(req, res, next) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isAcceptingBids: true } });
+    if (!user || !user.isAcceptingBids) {
+      return errorResponse(res, 'NOT_ACCEPTING_BIDS', 'Turn on Accepting bids before sharing your position.', 409);
+    }
+    const { latitude, longitude } = req.body;
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { lastLat: latitude, lastLng: longitude, lastLocationAt: new Date() },
+    });
+    return successResponse(res, { recordedAt: new Date().toISOString() }, 'Position recorded');
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
+  setAvailability,
+  reportLivePosition,
   listMyPenalties,
   listFleetInvitations,
   acceptFleetInvitation,

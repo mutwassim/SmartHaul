@@ -11,6 +11,13 @@ const submitBidSchema = z.object({
   vehicleId: z.string().uuid('Valid vehicle UUID required').optional(),
 });
 
+const availabilitySchema = z.object({ accepting: z.boolean() });
+
+const livePositionSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+});
+
 const updateBidSchema = z.object({
   proposedFare: z.number().positive('Proposed fare must be greater than 0 PKR').optional(),
   estimatedDeliveryTime: z.string().optional(),
@@ -61,6 +68,8 @@ const batchPositionsSyncSchema = z.object({
 });
 
 module.exports = {
+  availabilitySchema,
+  livePositionSchema,
   submitBidSchema,
   updateBidSchema,
   updateTripStatusSchema,

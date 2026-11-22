@@ -167,6 +167,7 @@ module.exports = {
     MAX_COMPLAINT_DESCRIPTION: 2000, // Complaint and dispute text cap (C-39)
     MAX_FILE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB (SI-4.3, OE-12)
     MAX_GPS_ACCURACY_METERS: 100, // HI-3
+    LIVE_LOCATION_MAX_AGE_MINUTES: 10, // A shared position older than this is ignored by matching (FR-RM-4)
     RETURN_LOAD_RADIUS_KM: 50, // Proximity radius for return load detection
     NO_SHOW_PENALTY_LIMIT: 3, // Active no-show penalties in a calendar month that suspend the account
     PROXIMITY_MAX_POINTS: 30, // FR-RM-4 proximity term: points at the pickup (the weight in MATCH_WEIGHTS)
