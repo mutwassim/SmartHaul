@@ -25,7 +25,7 @@ let adminToken;
 const minutesAgo = (n) => new Date(Date.now() - n * 60 * 1000);
 const notes = async (token) => JSON.stringify((await request(app).get(`${API}/notifications`).set(auth(token))).body);
 const cancel = (owner, id, reason = 'Cargo no longer needed') =>
-  request(app).post(`${API}/shipments/${id}/cancel`).set(auth(owner.token)).send(reason === null ? {} : { reason });
+  request(app).put(`${API}/shipments/${id}/cancel`).set(auth(owner.token)).send(reason === null ? {} : { reason });
 const mkSocket = () => ({ sent: [], readyState: 1, tripIds: new Set(), send(m) { this.sent.push(JSON.parse(m)); } });
 const asUser = (u, role) => ({ id: u.id, role });
 const retireOldTestVehicles = (keepIds) =>
