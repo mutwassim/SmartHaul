@@ -10,6 +10,8 @@ const { requireVerifiedAccount } = require('../../middleware/verification.middle
 const { validateRequest } = require('../../middleware/validate.middleware');
 const { ROLES, LIMITS } = require('../../config/constants');
 const {
+  availabilitySchema,
+  livePositionSchema,
   submitBidSchema,
   updateBidSchema,
   updateTripStatusSchema,
@@ -26,6 +28,22 @@ router.use(authenticate);
 
 // Load discovery and bidding are open to fleet owners as well as drivers (FR-FO-7, FR-FO-8)
 const canBid = requireRole(ROLES.DRIVER, ROLES.FLEET_OWNER);
+
+// Accepting bids switch and the position shared while it is on (FR-DR-19)
+router.put(
+  '/availability',
+  requireRole(ROLES.DRIVER),
+  requireVerifiedAccount,
+  validateRequest({ body: availabilitySchema }),
+  driverController.setAvailability
+);
+router.post(
+  '/location',
+  requireRole(ROLES.DRIVER),
+  requireVerifiedAccount,
+  validateRequest({ body: livePositionSchema }),
+  driverController.reportLivePosition
+);
 
 // Matched load discovery (requires verified account, BR-3)
 router.get('/matched-shipments', canBid, requireVerifiedAccount, driverController.getMatchedShipments);

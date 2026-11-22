@@ -172,8 +172,13 @@ async function computeRecommendationsForShipment(shipmentId) {
             avgRating: true,
             completedTripsCount: true,
             serviceArea: true,
+            isAcceptingBids: true,
+            lastLat: true,
+            lastLng: true,
+            lastLocationAt: true,
           },
         },
+        defaultDriver: { select: { isAcceptingBids: true, lastLat: true, lastLng: true, lastLocationAt: true } },
       },
     });
 
@@ -212,6 +217,12 @@ async function computeRecommendationsForShipment(shipmentId) {
 
     for (const vehicle of candidates) {
       const reasons = [];
+
+      // A driver who switched Accepting bids off is not offered loads (FR-DR-19)
+      const driverUser = vehicle.defaultDriver || vehicle.owner;
+      if (vehicle.owner.isAcceptingBids === false || (vehicle.defaultDriver && vehicle.defaultDriver.isAcceptingBids === false)) {
+        continue;
+      }
 
       // Physical capacity filter (BR-4)
       if (vehicle.ratedCapacity < shipment.cargoWeight) {
@@ -274,18 +285,29 @@ async function computeRecommendationsForShipment(shipmentId) {
         }
       }
 
-      // Proximity (FR-RM-4): distance from where the vehicle will be free (the destination of its
-      // current trip, else of its latest trip) to this pickup. A vehicle with no known reference gets no points.
+      // Proximity (FR-RM-4): distance from where the vehicle will be free to this pickup. The reference is the
+      // destination of its current trip; else the driver's shared live position (Accepting bids on, not older than
+      // LIVE_LOCATION_MAX_AGE_MINUTES); else the destination of its latest trip. No known reference: no points.
       let proximityScore = 0;
-      const referenceShipment = (activeByVehicle.get(vehicle.id) || [])[0] || (recentTrip && recentTrip.shipment) || null;
-      if (referenceShipment) {
-        const roadKm =
-          straightKm(
-            { lat: referenceShipment.dropoffLat, lng: referenceShipment.dropoffLng },
-            { lat: shipment.pickupLat, lng: shipment.pickupLng }
-          ) * ROAD_FACTOR;
+      const activeShipment = (activeByVehicle.get(vehicle.id) || [])[0] || null;
+      const liveMaxAgeMs = LIMITS.LIVE_LOCATION_MAX_AGE_MINUTES * 60 * 1000;
+      const liveSource = [driverUser, vehicle.owner].find(
+        (u) => u && u.lastLat != null && u.lastLng != null && u.lastLocationAt && Date.now() - new Date(u.lastLocationAt).getTime() <= liveMaxAgeMs
+      );
+      let reference = null;
+      let referenceLabel = 'its next free point';
+      if (activeShipment) {
+        reference = { lat: activeShipment.dropoffLat, lng: activeShipment.dropoffLng };
+      } else if (liveSource) {
+        reference = { lat: liveSource.lastLat, lng: liveSource.lastLng };
+        referenceLabel = 'its current position';
+      } else if (recentTrip && recentTrip.shipment) {
+        reference = { lat: recentTrip.shipment.dropoffLat, lng: recentTrip.shipment.dropoffLng };
+      }
+      if (reference) {
+        const roadKm = straightKm(reference, { lat: shipment.pickupLat, lng: shipment.pickupLng }) * ROAD_FACTOR;
         proximityScore = computeProximityScore(roadKm);
-        if (proximityScore > 0) reasons.push(`Proximity: about ${Math.round(roadKm)}km from its next free point to pickup`);
+        if (proximityScore > 0) reasons.push(`Proximity: about ${Math.round(roadKm)}km from ${referenceLabel} to pickup`);
       }
 
       // Composite ranking score (FR-RM-5, Algorithm 1)

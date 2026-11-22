@@ -27,6 +27,7 @@ async function getProfile(req, res, next) {
         avgRating: true,
         totalRatings: true,
         completedTripsCount: true,
+        isAcceptingBids: true,
         createdAt: true,
         driverVehicle: {
           select: {
