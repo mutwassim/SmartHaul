@@ -28,6 +28,18 @@ afterAll(async () => {
 });
 
 describe('Accepting bids switch (FR-DR-19)', () => {
+  test('FT-45: a new driver has Accepting bids off, shares no position and sees no loads until the switch is turned on', async () => {
+    const owner = await register('CARGO_OWNER', 'ft45o');
+    const driver = await verifiedDriver('ft45d');
+    await prisma.user.update({ where: { id: driver.id }, data: { isAcceptingBids: false } });
+    const fresh = await prisma.user.findUnique({ where: { id: driver.id }, select: { isAcceptingBids: true } });
+    expect(fresh.isAcceptingBids).toBe(false);
+    const id = await newShipment(owner);
+    const feed = await request(app).get(`${API}/driver/matched-shipments`).set(auth(driver.token));
+    expect(JSON.stringify(feed.body)).not.toContain(id);
+    expect((await share(driver)).status).toBe(409);
+  });
+
   test('FT-43: a driver who switches Accepting bids off sees no loads and is not ranked; switching on restores both', async () => {
     const owner = await register('CARGO_OWNER', 'ft43o');
     const driver = await verifiedDriver('ft43d');

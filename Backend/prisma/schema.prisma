@@ -205,7 +205,7 @@ model User {
   tokenVersion        Int               @default(0) // Bumped to end every session of this user (SEC-4)
   statusBeforeSuspension AccountStatus? // Restored when an administrator reinstates the account
   lastLoginAt         DateTime?
-  isAcceptingBids     Boolean           @default(true) // Driver's Accepting bids switch (FR-DR-19)
+  isAcceptingBids     Boolean           @default(false) // Driver's Accepting bids switch (FR-DR-19)
   lastLat             Float?            // Latest position, kept only while the switch is on (FR-DR-19, SEC-18)
   lastLng             Float?
   lastLocationAt      DateTime?
