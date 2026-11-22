@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 
 /**
  * Appends an immutable record to the administrative audit log
- * Requirement: BR-28, SEC-15, FR-AD-19
+ * Requirement: BR-28, SEC-15, FR-AD-13
  */
 async function logAdminAction({
   adminId,
@@ -40,7 +40,7 @@ async function logAdminAction({
 
 /**
  * Records an authentication event
- * Requirement: FR-AD-3, FR-SV-19
+ * Requirement: FR-SV-13, FR-SV-13
  */
 async function logAuthEvent({
   userId = null,

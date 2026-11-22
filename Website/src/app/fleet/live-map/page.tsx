@@ -235,8 +235,8 @@ export default function FleetLiveMapPage() {
             </h1>
             <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               {isRTL
-                ? `${trips.length} فعال گاڑیاں لائیو جی پی ایس پر موجود ہیں (FR-FO-15)`
-                : `${trips.length} active fleet vehicles currently reporting live GPS streams (FR-FO-15)`}
+                ? `${trips.length} فعال گاڑیاں لائیو جی پی ایس پر موجود ہیں (FR-FO-12)`
+                : `${trips.length} active fleet vehicles currently reporting live GPS streams (FR-FO-12)`}
             </p>
           </div>
         </div>

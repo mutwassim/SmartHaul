@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const paymentController = require('./payment.controller');
 const { authenticate } = require('../../middleware/auth.middleware');
+const { blockSuspended } = require('../../middleware/verification.middleware');
 const { validateRequest } = require('../../middleware/validate.middleware');
 const {
   updatePaymentStatusSchema,
@@ -9,6 +10,7 @@ const {
 } = require('./payment.validation');
 
 router.use(authenticate);
+router.use(blockSuspended);
 
 router.get('/', paymentController.listPaymentRecords);
 router.get('/:id', paymentController.getPaymentRecordById);

@@ -3,7 +3,8 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
-import '../../core/services/app_state_provider.dart';
+import '../../core/state/app_state_provider.dart';
+import '../../core/state/auth_provider.dart';
 import '../../core/localization/app_localizations.dart';
 
 class SmartHaulBottomNav extends StatelessWidget {
@@ -18,7 +19,7 @@ class SmartHaulBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = Provider.of<AppStateProvider>(context);
     final l10n = AppLocalizations.of(context);
-    final isCargoOwner = state.currentRole == UserRole.cargoOwner;
+    final isCargoOwner = context.watch<AuthProvider>().role == UserRole.cargoOwner;
 
     return Container(
       decoration: BoxDecoration(

@@ -1,124 +1,93 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smarthaul/app.dart';
+import 'package:smarthaul/core/network/api_exception.dart';
+
+import 'support/fake_api.dart';
+import 'support/fakes.dart';
+
+Future<void> _signIn(WidgetTester tester, {required bool driver}) async {
+  final roleCard = find.byKey(Key(driver ? 'truckDriverRoleCard' : 'cargoOwnerRoleCard'));
+  await tester.ensureVisible(roleCard);
+  await tester.tap(roleCard);
+  await tester.pumpAndSettle();
+  final continueButton = find.byKey(const Key('welcomeContinueButton'));
+  await tester.ensureVisible(continueButton);
+  await tester.tap(continueButton);
+  await tester.pumpAndSettle();
+
+  final fields = find.byType(TextFormField);
+  await tester.enterText(fields.at(0), 'user@example.com');
+  await tester.enterText(fields.at(1), 'Secret#123');
+  await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+  await tester.pumpAndSettle();
+}
 
 void main() {
-  testWidgets('1. SmartHaul onboarding and Cargo Owner dashboard flow',
-      (WidgetTester tester) async {
+  testWidgets('cargo owner signs in and sees real shipments', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.0;
-    addTearDown(() => tester.view.resetPhysicalSize());
+    addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(const SmartHaulApp());
+    final t = await buildServices();
+    t.api
+      ..on('POST /auth/login', (body, _) {
+        expect((body as Map)['role'], 'CARGO_OWNER');
+        return {'token': 'tok', 'user': userJson()};
+      })
+      ..on('GET /shipments', (_, __) => [shipmentJson(bids: [bidJson()])]);
+
+    await tester.pumpWidget(SmartHaulApp(services: t.services));
     await tester.pumpAndSettle();
-
-    // Verify initial welcome screen elements
-    expect(find.text('SmartHaul'), findsWidgets);
     expect(find.text('Select Language / زبان منتخب کریں'), findsOneWidget);
-    expect(find.text('Select Role / کردار کا انتخاب'), findsOneWidget);
 
-    // Tap on Cargo Owner role
-    final cargoOwnerCard = find.byKey(const Key('cargoOwnerRoleCard'));
-    await tester.ensureVisible(cargoOwnerCard);
-    await tester.tap(cargoOwnerCard);
-    await tester.pumpAndSettle();
+    await _signIn(tester, driver: false);
 
-    // Tap Continue button
-    final continueBtn = find.byKey(const Key('welcomeContinueButton'));
-    await tester.ensureVisible(continueBtn);
-    await tester.tap(continueBtn);
-    await tester.pumpAndSettle();
-
-    // Verify Cargo Owner Dashboard elements
     expect(find.text('Tariq Mills Ltd.'), findsOneWidget);
-    expect(find.text('Active Fleet'), findsOneWidget);
-    expect(find.text('Open Loads'), findsOneWidget);
-    expect(find.text('Active Shipment'), findsOneWidget);
-    expect(find.text('Non-Custodial Audit Ledger'), findsOneWidget);
+    expect(find.text('SH-1001'), findsWidgets);
+    expect(find.text('Lahore → Islamabad'), findsWidgets);
   });
 
-  testWidgets('2. SmartHaul Driver role selection and dashboard interactions',
-      (WidgetTester tester) async {
+  testWidgets('wrong password shows the server message and stays on sign in', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.0;
-    addTearDown(() => tester.view.resetPhysicalSize());
+    addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(const SmartHaulApp());
+    final t = await buildServices();
+    t.api.on('POST /auth/login', (_, __) => throw const ApiException('INVALID_CREDENTIALS', 'Wrong password.', 401));
+
+    await tester.pumpWidget(SmartHaulApp(services: t.services));
     await tester.pumpAndSettle();
+    await _signIn(tester, driver: false);
 
-    // Tap on Truck Driver role card
-    final driverCard = find.byKey(const Key('truckDriverRoleCard'));
-    await tester.ensureVisible(driverCard);
-    await tester.tap(driverCard);
-    await tester.pumpAndSettle();
-
-    // Tap Continue button
-    final continueBtn = find.byKey(const Key('welcomeContinueButton'));
-    await tester.ensureVisible(continueBtn);
-    await tester.tap(continueBtn);
-    await tester.pumpAndSettle();
-
-    // Verify Driver Dashboard
-    expect(find.text('Salam, Ahmad'), findsOneWidget);
-    expect(find.text('START TRANSIT (روانہ ہوں)'), findsOneWidget);
-    expect(find.text('Today\'s Pay'), findsOneWidget);
-    expect(find.text('Driving Hours'), findsOneWidget);
+    expect(find.text('Wrong password.'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
   });
 
-  testWidgets('3. Tab navigation to Live GPS Tracking and Audit Ledger',
-      (WidgetTester tester) async {
+  testWidgets('driver with an active trip sees one next step and can open it', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.0;
-    addTearDown(() => tester.view.resetPhysicalSize());
+    addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(const SmartHaulApp());
+    final t = await buildServices();
+    t.api
+      ..on('POST /auth/login', (body, _) => {'token': 'tok', 'user': userJson(role: 'DRIVER', name: 'Bilal Khan', status: 'VERIFIED')})
+      ..on('GET /driver/active-trip', (_, __) => {'id': 't1', 'vehicle': {'id': 'v1'}, 'shipment': shipmentJson(status: 'BOOKED')})
+      ..on('GET /driver/vehicles', (_, __) => [])
+      ..on('GET /driver/matched-shipments', (_, __) => [])
+      ..on('GET /driver/earnings', (_, __) => {'totalCompletedTrips': 0, 'totalEarningsPKR': 0, 'pendingSettlementPKR': 0})
+      ..on('GET /driver/penalties', (_, __) => {'activeThisMonth': 0, 'limit': 3});
+
+    await tester.pumpWidget(SmartHaulApp(services: t.services));
+    await tester.pumpAndSettle();
+    await _signIn(tester, driver: true);
+
+    expect(find.text('Active Assignment'), findsWidgets);
+    await tester.tap(find.text('Open trip'));
     await tester.pumpAndSettle();
 
-    // Onboard as Cargo Owner
-    final continueBtn = find.byKey(const Key('welcomeContinueButton'));
-    await tester.ensureVisible(continueBtn);
-    await tester.tap(continueBtn);
-    await tester.pumpAndSettle();
-
-    // Tap Tracking Tab
-    await tester.tap(find.byIcon(Icons.near_me_outlined));
-    await tester.pumpAndSettle();
-
-    // Verify Live GPS Tracking screen
-    expect(find.text('Live GPS • 78 km/h'), findsOneWidget);
-    expect(find.text('Trip Milestone Progress'), findsOneWidget);
-
-    // Tap Ledger Tab
-    await tester.tap(find.byIcon(Icons.receipt_long_outlined));
-    await tester.pumpAndSettle();
-
-    // Verify Direct Carrier Settlement Audit Ledger
-    expect(find.text('DIRECT CARRIER SETTLEMENT'), findsOneWidget);
-    expect(find.text('Non-Custodial Audit Ledger'), findsWidgets);
-  });
-
-  testWidgets('4. Urdu language localization and bidirectional toggle',
-      (WidgetTester tester) async {
-    tester.view.physicalSize = const Size(1080, 2400);
-    tester.view.devicePixelRatio = 2.0;
-    addTearDown(() => tester.view.resetPhysicalSize());
-
-    await tester.pumpWidget(const SmartHaulApp());
-    await tester.pumpAndSettle();
-
-    // Select Urdu language
-    await tester.tap(find.text('اردو (Urdu)'));
-    await tester.pumpAndSettle();
-
-    // Tap Continue
-    final continueBtn = find.byKey(const Key('welcomeContinueButton'));
-    await tester.ensureVisible(continueBtn);
-    await tester.tap(continueBtn);
-    await tester.pumpAndSettle();
-
-    // Verify Urdu Dashboard
-    expect(find.text('طارق ملز لمیٹڈ'), findsOneWidget);
-    expect(find.text('فعال فلیٹ'), findsOneWidget);
-    expect(find.text('کھلے لوڈز'), findsOneWidget);
+    expect(find.text('Reached pickup'), findsWidgets);
+    expect(find.text('Cancel trip'), findsOneWidget);
+    expect(find.text('Cargo loaded'), findsOneWidget); // timeline only, no button
   });
 }

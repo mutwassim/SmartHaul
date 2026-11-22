@@ -226,8 +226,8 @@ export default function FleetReportsPage() {
           </h1>
           <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0', fontSize: '0.9rem' }}>
             {isRTL
-              ? 'گاڑیوں کی خالی چلنے کی شرح اور ڈرائیوروں کی کارکردگی کا تفصیلی جائزہ (FR-FO-17, FR-AN-7)'
-              : 'Deadheading distance analysis, fleet efficiency metrics, and driver scorecards (FR-FO-17, FR-AN-7).'}
+              ? 'گاڑیوں کی خالی چلنے کی شرح اور ڈرائیوروں کی کارکردگی کا تفصیلی جائزہ (FR-FO-14, FR-AN-7)'
+              : 'Deadheading distance analysis, fleet efficiency metrics, and driver scorecards (FR-FO-14, FR-AN-7).'}
           </p>
         </div>
 
@@ -269,7 +269,7 @@ export default function FleetReportsPage() {
           title={isRTL ? 'اوسط خالی چلنے کی شرح' : 'Avg Empty Running Ratio'}
           value={`${avgEmptyRunning}%`}
           icon={<Percent size={22} />}
-          description={isRTL ? 'واپسی پر خالی مائلیج' : 'Target: < 25% (FR-FO-19)'}
+          description={isRTL ? 'واپسی پر خالی مائلیج' : 'Target: < 25% (FR-FO-16)'}
         />
         <StatsCard
           title={isRTL ? 'نمایاں ڈرائیور' : 'Top Performing Driver'}

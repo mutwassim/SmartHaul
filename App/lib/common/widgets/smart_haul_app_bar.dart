@@ -4,7 +4,11 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_shapes.dart';
-import '../../core/services/app_state_provider.dart';
+import '../../core/state/app_state_provider.dart';
+import '../../core/state/auth_provider.dart';
+import '../../core/state/notification_provider.dart';
+import '../../features/notifications/notifications_screen.dart';
+import '../../features/profile/documents_screen.dart';
 
 class SmartHaulAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -74,39 +78,6 @@ class SmartHaulAppBar extends StatelessWidget implements PreferredSizeWidget {
                         color: AppColors.primaryFixedDim,
                       ).copyWith(letterSpacing: 1.2),
                     ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.secondary,
-                        borderRadius: AppShapes.roundedPill,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 5,
-                            height: 5,
-                            decoration: const BoxDecoration(
-                              color: AppColors.secondaryFixed,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            isUrdu ? 'آن لائن' : 'Online',
-                            style: const TextStyle(
-                              color: AppColors.onSecondary,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
                 Text(
@@ -171,45 +142,47 @@ class SmartHaulAppBar extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        // Role Switcher Avatar
+        // Notifications (FR-NC-13)
+        Consumer<NotificationProvider>(
+          builder: (context, inbox, _) => IconButton(
+            tooltip: 'Notifications',
+            icon: Badge(
+              isLabelVisible: inbox.unreadCount > 0,
+              label: Text('${inbox.unreadCount}'),
+              child: const Icon(Icons.notifications_none, color: AppColors.onPrimary),
+            ),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            ),
+          ),
+        ),
+        // Account: signed-in user and sign out (FR-SV-7)
         Padding(
-          padding: const EdgeInsets.only(right: 16, top: 12, bottom: 12),
-          child: PopupMenuButton<UserRole>(
-            tooltip: 'Switch User Mode',
+          padding: const EdgeInsets.only(right: 12, top: 12, bottom: 12),
+          child: PopupMenuButton<String>(
+            tooltip: 'Account',
             offset: const Offset(0, 48),
             shape: RoundedRectangleBorder(borderRadius: AppShapes.roundedLarge),
-            onSelected: (role) => state.setRole(role),
+            onSelected: (value) {
+              if (value == 'documents') {
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DocumentsScreen()));
+              } else {
+                context.read<AuthProvider>().logout();
+              }
+            },
             itemBuilder: (context) => [
               PopupMenuItem(
-                value: UserRole.cargoOwner,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.factory,
-                      color: state.currentRole == UserRole.cargoOwner
-                          ? AppColors.primary
-                          : AppColors.textSecondary,
-                    ),
-                    const SizedBox(width: 10),
-                    const Text('Cargo Owner (کارگو مالک)'),
-                  ],
-                ),
+                enabled: false,
+                child: Text(context.read<AuthProvider>().user?.fullName ?? ''),
               ),
-              PopupMenuItem(
-                value: UserRole.driver,
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.local_shipping,
-                      color: state.currentRole == UserRole.driver
-                          ? AppColors.primary
-                          : AppColors.textSecondary,
-                    ),
-                    const SizedBox(width: 10),
-                    const Text('Truck Driver (ٹرک ڈرائیور)'),
-                  ],
+              if (context.read<AuthProvider>().role != UserRole.admin)
+                PopupMenuItem(
+                  value: 'documents',
+                  child: Text(isUrdu ? 'میرے دستاویزات' : 'My documents'),
                 ),
+              PopupMenuItem(
+                value: 'logout',
+                child: Text(isUrdu ? 'سائن آؤٹ' : 'Sign out'),
               ),
             ],
             child: Container(
@@ -222,9 +195,7 @@ class SmartHaulAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
               child: Center(
                 child: Icon(
-                  state.currentRole == UserRole.cargoOwner
-                      ? Icons.business
-                      : Icons.person,
+                  context.watch<AuthProvider>().role == UserRole.cargoOwner ? Icons.business : Icons.person,
                   color: AppColors.onPrimary,
                   size: 20,
                 ),

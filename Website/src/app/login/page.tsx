@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -12,8 +13,8 @@ export default function LoginPage() {
   const { t } = useLanguage();
   const router = useRouter();
 
-  const [identifier, setIdentifier] = useState('admin@smarthaul.pk');
-  const [password, setPassword] = useState('SmartHaul@Admin2026!');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('ADMIN');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -39,15 +40,9 @@ export default function LoginPage() {
     }
   };
 
-  const setDemoCredentials = (selectedRole: UserRole) => {
+  const selectRole = (selectedRole: UserRole) => {
     setRole(selectedRole);
-    if (selectedRole === 'ADMIN') {
-      setIdentifier('admin@smarthaul.pk');
-      setPassword('SmartHaul@Admin2026!');
-    } else {
-      setIdentifier('fleet@haul.pk');
-      setPassword('FleetPass@2026!');
-    }
+    setError(null);
   };
 
   return (
@@ -94,7 +89,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Quick Demo Selector */}
+        {/* Portal selector */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
           <button
             type="button"
@@ -106,7 +101,7 @@ export default function LoginPage() {
               backgroundColor: role === 'ADMIN' ? 'var(--primary)' : 'var(--bg-tertiary)',
               color: role === 'ADMIN' ? '#ffffff' : 'var(--text-secondary)',
             }}
-            onClick={() => setDemoCredentials('ADMIN')}
+            onClick={() => selectRole('ADMIN')}
           >
             <Shield size={14} />
             <span>Admin Portal</span>
@@ -121,7 +116,7 @@ export default function LoginPage() {
               backgroundColor: role === 'FLEET_OWNER' ? 'var(--primary)' : 'var(--bg-tertiary)',
               color: role === 'FLEET_OWNER' ? '#ffffff' : 'var(--text-secondary)',
             }}
-            onClick={() => setDemoCredentials('FLEET_OWNER')}
+            onClick={() => selectRole('FLEET_OWNER')}
           >
             <Briefcase size={14} />
             <span>Fleet Portal</span>
@@ -193,6 +188,15 @@ export default function LoginPage() {
             <ArrowRight size={16} />
           </button>
         </form>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', fontSize: '0.85rem' }}>
+          <Link href="/forgot-password" style={{ color: 'var(--primary)' }}>
+            Forgot password?
+          </Link>
+          <Link href="/register" style={{ color: 'var(--primary)' }}>
+            Register a fleet
+          </Link>
+        </div>
       </div>
     </div>
   );

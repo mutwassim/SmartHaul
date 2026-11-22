@@ -1,10 +1,14 @@
 const { z } = require('zod');
+const { passwordRegex, phoneSchema, emailSchema } = require('../auth/auth.validation');
 
 const provisionAdminSchema = z.object({
   name: z.string().min(2, 'Name is required'),
-  email: z.string().email('Valid email address required'),
-  phone: z.string().min(10, 'Valid phone number required'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  email: emailSchema,
+  phone: phoneSchema,
+  password: z.string().regex(
+    passwordRegex,
+    'Password must be at least 8 characters and contain an uppercase letter, a lowercase letter, a number and a special character'
+  ),
 });
 
 const verificationDecisionSchema = z.object({
@@ -17,11 +21,16 @@ const updateUserStatusSchema = z.object({
   reason: z.string().min(3, 'Reason is required for status change (BR-28)'),
 });
 
+const issueResetTokenSchema = z.object({
+  reason: z.string().min(3, 'Reason is required (identity check performed)'),
+});
+
 const resolveComplaintSchema = z.object({
   decision: z.enum(['RESOLVED', 'REJECTED']),
-  adminRemarks: z.string().min(3, 'Admin written remarks are required (FR-AD-15)'),
+  adminRemarks: z.string().min(3, 'Admin written remarks are required (FR-AD-10)'),
   adjustedFare: z.number().positive().optional(),
   adjustedPaymentStatus: z.enum(['PENDING', 'PARTIAL', 'PAID']).optional(),
+  waivePenalty: z.boolean().optional(), // Cancellation disputes only: lifts the no-show penalty
 });
 
 const broadcastAnnouncementSchema = z.object({
@@ -34,6 +43,7 @@ module.exports = {
   provisionAdminSchema,
   verificationDecisionSchema,
   updateUserStatusSchema,
+  issueResetTokenSchema,
   resolveComplaintSchema,
   broadcastAnnouncementSchema,
 };

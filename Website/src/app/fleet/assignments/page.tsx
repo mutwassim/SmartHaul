@@ -31,7 +31,7 @@ export default function FleetAssignmentsPage() {
       const [vData, dData, sData] = await Promise.all([
         api.get<Vehicle[]>('/fleet/vehicles'),
         api.get<User[]>('/fleet/drivers'),
-        api.get<Shipment[]>('/shipments?status=BOOKED'),
+        api.get<Shipment[]>('/fleet/bookings'),
       ]);
       setVehicles(vData || []);
       setDrivers(dData || []);
@@ -65,7 +65,7 @@ export default function FleetAssignmentsPage() {
       });
 
       setIsAssignModalOpen(false);
-      alert('Driver and Vehicle assigned to shipment successfully (FR-FO-13)');
+      alert('Driver and Vehicle assigned to shipment successfully (FR-FO-11)');
       fetchData();
     } catch (err: any) {
       setFormError(err.message || 'Failed to assign resources');
@@ -124,7 +124,7 @@ export default function FleetAssignmentsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-          Resource Assignment (FR-FO-13, FR-FO-14)
+          Resource Assignment (FR-FO-11, FR-FO-11)
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
           Nominate specific verified drivers and available fleet vehicles to won shipment bookings (BR-12, BR-13)
@@ -140,7 +140,7 @@ export default function FleetAssignmentsPage() {
         emptyMessage="No won bookings awaiting resource assignment."
       />
 
-      {/* Resource Assignment Modal (FR-FO-13) */}
+      {/* Resource Assignment Modal (FR-FO-11) */}
       <Modal
         isOpen={isAssignModalOpen}
         onClose={() => setIsAssignModalOpen(false)}
@@ -213,7 +213,7 @@ export default function FleetAssignmentsPage() {
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={isProcessing}>
-              Confirm Assignment (FR-FO-13)
+              Confirm Assignment (FR-FO-11)
             </button>
           </div>
         </form>

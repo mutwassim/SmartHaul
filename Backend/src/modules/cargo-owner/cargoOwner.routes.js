@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const cargoOwnerController = require('./cargoOwner.controller');
 const { authenticate } = require('../../middleware/auth.middleware');
+const { blockSuspended } = require('../../middleware/verification.middleware');
 const { requireRole } = require('../../middleware/rbac.middleware');
 const { validateRequest } = require('../../middleware/validate.middleware');
 const { ROLES } = require('../../config/constants');
@@ -10,9 +11,11 @@ const {
   createShipmentSchema,
   acceptBidSchema,
   cancelShipmentSchema,
+  noShowSchema,
 } = require('./cargoOwner.validation');
 
 router.use(authenticate);
+router.use(blockSuspended);
 
 router.post(
   '/preview-route',
@@ -39,6 +42,12 @@ router.get(
 );
 
 router.post(
+  '/:id/publish',
+  requireRole(ROLES.CARGO_OWNER),
+  cargoOwnerController.publishShipment
+);
+
+router.post(
   '/:id/accept-bid',
   requireRole(ROLES.CARGO_OWNER),
   validateRequest({ body: acceptBidSchema }),
@@ -49,6 +58,13 @@ router.post(
   '/:id/confirm-delivery',
   requireRole(ROLES.CARGO_OWNER),
   cargoOwnerController.confirmDelivery
+);
+
+router.post(
+  '/:id/no-show',
+  requireRole(ROLES.CARGO_OWNER),
+  validateRequest({ body: noShowSchema }),
+  cargoOwnerController.flagNoShow
 );
 
 router.put(

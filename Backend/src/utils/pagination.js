@@ -10,6 +10,8 @@ function getPaginationParams(query) {
 
   if (isNaN(page) || page < 1) {
     page = 1;
+  } else if (page > 100000) {
+    page = 100000;
   }
 
   if (isNaN(limit) || limit < 1) {

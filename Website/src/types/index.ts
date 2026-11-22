@@ -70,6 +70,7 @@ export interface User {
   phone: string;
   email: string;
   accountStatus: AccountStatus;
+  statusBeforeSuspension?: AccountStatus | null;
   businessName?: string | null;
   businessAddress?: string | null;
   serviceArea?: string[];

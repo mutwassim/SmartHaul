@@ -51,6 +51,7 @@ export const Sidebar: React.FC = () => {
     { label: t('live_map'), href: '/fleet/live-map', icon: MapPin },
     { label: t('payments'), href: '/fleet/payments', icon: CreditCard },
     { label: t('reports'), href: '/fleet/reports', icon: BarChart3 },
+    { label: t('profile'), href: '/fleet/profile', icon: UserCheck },
   ];
 
   const navItems = isAdmin ? adminNavItems : fleetNavItems;

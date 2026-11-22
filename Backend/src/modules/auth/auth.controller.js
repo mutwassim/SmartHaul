@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const prisma = require('../../config/db');
-const { generateToken, revokeToken } = require('../../utils/token');
+const crypto = require('crypto');
+const { generateToken, revokeToken, hashToken, verifyToken } = require('../../utils/token');
 const { encrypt, hashDeterministic } = require('../../services/encryption.service');
 const { logAuthEvent } = require('../../services/audit.service');
 const { registerDeviceToken } = require('../../services/fcm.service');
@@ -11,8 +11,11 @@ const { ROLES, ACCOUNT_STATUS, SECURITY, NOTIFICATION_TYPES } = require('../../c
 
 /**
  * Self-registration for Cargo Owners, Drivers, and Fleet Owners
- * Admin self-registration is strictly prohibited (FR-AD-4, FR-SV-1, BR-1, BR-2)
+ * Admin self-registration is strictly prohibited (FR-AD-1, FR-SV-1, BR-1, BR-2)
  */
+// Used to spend the same time on unknown accounts as on real ones
+const DUMMY_HASH = bcrypt.hashSync('smarthaul-timing-equaliser', 10);
+
 async function register(req, res, next) {
   try {
     const {
@@ -27,12 +30,12 @@ async function register(req, res, next) {
       preferredLanguage,
     } = req.body;
 
-    // Security Gate: Reject admin self-registration (FR-AD-4)
+    // Security Gate: Reject admin self-registration (FR-AD-1)
     if (role === ROLES.ADMIN) {
       return errorResponse(
         res,
         'ADMIN_SELF_REGISTRATION_PROHIBITED',
-        'Administrator accounts cannot be self-registered. They must be provisioned directly by an authorized administrator (FR-AD-4).',
+        'Administrator accounts cannot be self-registered. They must be provisioned directly by an authorized administrator (FR-AD-1).',
         403
       );
     }
@@ -72,14 +75,14 @@ async function register(req, res, next) {
     if (cnicNumber) {
       cnicHash = hashDeterministic(cnicNumber);
       const existingCnic = await prisma.user.findFirst({
-        where: { cnicHash },
+        where: { cnicHash, role },
       });
 
       if (existingCnic) {
         return errorResponse(
           res,
           'CNIC_ALREADY_REGISTERED',
-          'This CNIC number is already associated with another verified account on the platform (BR-2).',
+          'This CNIC number is already associated with another account in the selected role (BR-2).',
           409
         );
       }
@@ -98,7 +101,9 @@ async function register(req, res, next) {
     const initialStatus =
       role === ROLES.CARGO_OWNER ? ACCOUNT_STATUS.ACTIVE : ACCOUNT_STATUS.PENDING;
 
-    const newUser = await prisma.user.create({
+    let newUser;
+    try {
+      newUser = await prisma.user.create({
       data: {
         role,
         name,
@@ -127,12 +132,24 @@ async function register(req, res, next) {
         createdAt: true,
       },
     });
+    } catch (createError) {
+      // Two simultaneous registrations with the same CNIC: the database index decides (BR-2)
+      if (createError.code === 'P2002') {
+        return errorResponse(
+          res,
+          'CNIC_ALREADY_REGISTERED',
+          'This CNIC number is already associated with another account in the selected role (BR-2).',
+          409
+        );
+      }
+      throw createError;
+    }
 
-    // 6. Log authentication & registration activity (FR-SV-20)
+    // 6. Log authentication & registration activity (FR-SV-14)
     await logAuthEvent({
       userId: newUser.id,
       identifier: email,
-      action: 'LOGIN_SUCCESS',
+      action: 'REGISTERED',
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
@@ -169,7 +186,7 @@ async function register(req, res, next) {
 
 /**
  * User login with lockout protection
- * Requirement: SEC-5, FR-SV-2, FR-SV-3, FR-SV-18
+ * Requirement: SEC-5, FR-SV-2, FR-SV-2, FR-SV-2
  */
 async function login(req, res, next) {
   try {
@@ -184,12 +201,14 @@ async function login(req, res, next) {
       },
     });
 
-    // Generic invalid credential response to avoid account enumeration (FR-SV-3)
+    // Generic invalid credential response to avoid account enumeration (FR-SV-2)
     const invalidCredsResponse = () => {
       return errorResponse(res, 'INVALID_CREDENTIALS', 'Invalid identifier, password, or role combination', 401);
     };
 
     if (!user) {
+      // Same work as a real attempt so response time does not reveal whether the account exists
+      await bcrypt.compare(password, DUMMY_HASH);
       await logAuthEvent({
         identifier,
         action: 'LOGIN_FAILED',
@@ -199,7 +218,7 @@ async function login(req, res, next) {
       return invalidCredsResponse();
     }
 
-    // Check account lockout (SEC-5, FR-SV-18)
+    // Check account lockout (SEC-5, FR-SV-2)
     const now = new Date();
     if (user.lockoutUntil && user.lockoutUntil > now) {
       const minutesRemaining = Math.ceil((user.lockoutUntil - now) / (60 * 1000));
@@ -215,17 +234,41 @@ async function login(req, res, next) {
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
     if (!isPasswordValid) {
-      const failedAttempts = user.failedLoginAttempts + 1;
-      let lockoutDate = null;
+      // Failures count inside a 15-minute window (SEC-5). The increment is done by the database,
+      // so simultaneous wrong guesses cannot slip past the limit.
+      const windowStart = new Date(Date.now() - SECURITY.FAILED_ATTEMPTS_WINDOW_MS);
+      const restarted = await prisma.user.updateMany({
+        where: { id: user.id, OR: [{ firstFailedAt: null }, { firstFailedAt: { lt: windowStart } }] },
+        data: { failedLoginAttempts: 1, firstFailedAt: new Date(), lockoutUntil: null },
+      });
+      let failedAttempts = 1;
+      if (restarted.count === 0) {
+        const counted = await prisma.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: { increment: 1 } },
+          select: { failedLoginAttempts: true },
+        });
+        failedAttempts = counted.failedLoginAttempts;
+      }
 
       if (failedAttempts >= SECURITY.MAX_FAILED_LOGIN_ATTEMPTS) {
-        lockoutDate = new Date(Date.now() + SECURITY.LOCKOUT_DURATION_MS);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lockoutUntil: new Date(Date.now() + SECURITY.LOCKOUT_DURATION_MS) },
+        });
         await logAuthEvent({
           userId: user.id,
           identifier,
           action: 'ACCOUNT_LOCKED',
           ipAddress,
           userAgent: req.headers['user-agent'],
+        });
+        // The holder is told the account is locked (SEC-5)
+        await dispatchNotification({
+          recipientId: user.id,
+          type: 'ACCOUNT_SUSPENDED_OR_REINSTATED',
+          title: 'Account temporarily locked',
+          message: 'Your account was locked for 30 minutes after repeated failed login attempts. If this was not you, contact an administrator.',
         });
       } else {
         await logAuthEvent({
@@ -237,14 +280,6 @@ async function login(req, res, next) {
         });
       }
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: failedAttempts,
-          lockoutUntil: lockoutDate,
-        },
-      });
-
       return invalidCredsResponse();
     }
 
@@ -253,6 +288,7 @@ async function login(req, res, next) {
       where: { id: user.id },
       data: {
         failedLoginAttempts: 0,
+        firstFailedAt: null,
         lockoutUntil: null,
         lastLoginAt: now,
       },
@@ -263,7 +299,7 @@ async function login(req, res, next) {
       await registerDeviceToken(user.id, deviceToken, platform);
     }
 
-    // Log auth success (FR-AD-3, FR-SV-19)
+    // Log auth success (FR-SV-13, FR-SV-13)
     await logAuthEvent({
       userId: user.id,
       identifier,
@@ -307,7 +343,13 @@ async function login(req, res, next) {
 async function logout(req, res, next) {
   try {
     if (req.token) {
-      revokeToken(req.token);
+      await revokeToken(req.token);
+    }
+
+    // Stop pushes to this device after logout (SI-3.2)
+    const deviceToken = req.body && req.body.deviceToken;
+    if (typeof deviceToken === 'string' && deviceToken.length > 0) {
+      await prisma.deviceToken.deleteMany({ where: { token: deviceToken, userId: req.user.id } });
     }
 
     if (req.user) {
@@ -328,7 +370,7 @@ async function logout(req, res, next) {
 
 /**
  * Request password recovery token
- * Requirement: FR-SV-6
+ * Requirement: FR-SV-4
  */
 async function requestPasswordRecovery(req, res, next) {
   try {
@@ -341,25 +383,17 @@ async function requestPasswordRecovery(req, res, next) {
       },
     });
 
-    // Always respond with success to prevent user enumeration
-    if (!user) {
-      return successResponse(
+    const genericResponse = () =>
+      successResponse(
         res,
         null,
-        'If an account matches the provided details, a password recovery token has been issued.'
+        'If an account matches the provided details, a recovery request has been recorded. An administrator will contact you with a reset token.'
       );
+
+    // Always respond identically to prevent user enumeration
+    if (!user) {
+      return genericResponse();
     }
-
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min expiry
-
-    await prisma.passwordResetToken.create({
-      data: {
-        userId: user.id,
-        token: resetToken,
-        expiresAt,
-      },
-    });
 
     await logAuthEvent({
       userId: user.id,
@@ -369,12 +403,9 @@ async function requestPasswordRecovery(req, res, next) {
       userAgent: req.headers['user-agent'],
     });
 
-    // In production, token is sent via SMS / in-app notification
-    return successResponse(
-      res,
-      { resetToken }, // Returned in dev/testing response envelope
-      'Password recovery token issued successfully'
-    );
+    // The token is never returned here: anyone knowing a phone number could take over the account.
+    // An administrator issues it to the verified owner (POST /admin/users/:id/reset-token).
+    return genericResponse();
   } catch (error) {
     next(error);
   }
@@ -382,14 +413,15 @@ async function requestPasswordRecovery(req, res, next) {
 
 /**
  * Reset password using recovery token
- * Requirement: FR-SV-6, SEC-1
+ * Requirement: FR-SV-4, SEC-1
  */
 async function resetPassword(req, res, next) {
   try {
     const { token, newPassword } = req.body;
 
+    // Tokens are stored as hashes, so a database leak does not expose usable tokens
     const resetRecord = await prisma.passwordResetToken.findUnique({
-      where: { token },
+      where: { token: hashToken(token) },
       include: { user: true },
     });
 
@@ -406,7 +438,9 @@ async function resetPassword(req, res, next) {
         data: {
           passwordHash,
           failedLoginAttempts: 0,
+          firstFailedAt: null,
           lockoutUntil: null,
+          tokenVersion: { increment: 1 }, // ends every existing session (FR-SV-4)
         },
       }),
       prisma.passwordResetToken.update({
@@ -429,8 +463,26 @@ async function resetPassword(req, res, next) {
   }
 }
 
+/**
+ * Issue a fresh token for an active session, so a user who keeps working is not logged out
+ * mid-task (SEC-3, FR-SV-2). The 30-day absolute limit still counts from the original login.
+ */
+async function refreshSession(req, res, next) {
+  try {
+    const decoded = verifyToken(req.token);
+    const token = generateToken(
+      { id: req.user.id, role: req.user.role, accountStatus: req.user.accountStatus, tokenVersion: req.user.tokenVersion },
+      { issuedAt: decoded.createdAt }
+    );
+    return successResponse(res, { token }, 'Session refreshed');
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   register,
+  refreshSession,
   login,
   logout,
   requestPasswordRecovery,

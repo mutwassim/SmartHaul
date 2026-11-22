@@ -2,7 +2,7 @@ const { errorResponse } = require('../utils/response');
 
 /**
  * Role-Based Access Control (RBAC) Middleware
- * Requirement: SEC-9, FR-SV-8
+ * Requirement: SEC-9, FR-SV-6
  * @param {string[]} allowedRoles Array of roles permitted to access the endpoint
  */
 function requireRole(...allowedRoles) {

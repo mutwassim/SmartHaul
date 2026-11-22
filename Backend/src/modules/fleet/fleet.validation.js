@@ -13,8 +13,8 @@ const addVehicleSchema = z.object({
 });
 
 const updateVehicleSchema = z.object({
-  model: z.string().optional(),
-  year: z.number().int().optional(),
+  model: z.string().min(2).optional(),
+  year: z.number().int().min(1980).max(new Date().getFullYear() + 1).optional(),
   availabilityStatus: z.enum(['AVAILABLE', 'ASSIGNED', 'INACTIVE', 'UNDER_MAINTENANCE']).optional(),
   defaultDriverId: z.string().uuid().nullable().optional(),
 });

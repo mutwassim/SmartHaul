@@ -1,6 +1,6 @@
 const axios = require('axios');
 const env = require('../config/env');
-const { TIMING } = require('../config/constants');
+const { TIMING, LIMITS } = require('../config/constants');
 const logger = require('../utils/logger');
 
 /**
@@ -19,9 +19,20 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const straightLineKm = R * c;
 
-  // Road geometry in Pakistan typically incurs ~1.25x to 1.35x winding factor
-  const estimatedRoadKm = Math.round(straightLineKm * 1.3 * 10) / 10;
-  const estimatedDurationMinutes = Math.round((estimatedRoadKm / 60) * 60); // Assuming average 60 km/h
+  return {
+    distanceKm: Math.round(straightLineKm * 10) / 10,
+    isDistanceApproximate: true,
+  };
+}
+
+/**
+ * Approximate road route used when OSRM is unavailable or for live ETA estimates (FR-RT-5).
+ * Road geometry in Pakistan typically adds ~1.25x to 1.35x to the straight-line distance.
+ */
+function estimateRoadRoute(lat1, lon1, lat2, lon2) {
+  const straightLineKm = calculateHaversineDistance(lat1, lon1, lat2, lon2).distanceKm;
+  const estimatedRoadKm = Math.round(straightLineKm * LIMITS.ROAD_FACTOR * 10) / 10;
+  const estimatedDurationMinutes = Math.round((estimatedRoadKm / LIMITS.AVERAGE_SPEED_KMH) * 60); // Same speed as the delivery-window checks (C-52)
 
   return {
     distanceKm: estimatedRoadKm,
@@ -33,7 +44,7 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
 
 /**
  * Retrieves driving route, road distance and duration from OSRM
- * Requirement: SI-2.1, SI-2.4 (5s timeout), SI-2.5 (no PII sent), FR-RM-6, FR-RM-7
+ * Requirement: SI-2.1, SI-2.4 (5s timeout), SI-2.5 (no PII sent), FR-RT-5, FR-RT-5
  */
 async function getRoute(pickupLat, pickupLng, dropoffLat, dropoffLng) {
   const url = `${env.OSRM_BASE_URL}/route/v1/driving/${pickupLng},${pickupLat};${dropoffLng},${dropoffLat}?overview=full&geometries=polyline`;
@@ -61,15 +72,16 @@ async function getRoute(pickupLat, pickupLng, dropoffLat, dropoffLng) {
       };
     } else {
       logger.warn('OSRM returned non-OK response code, falling back to Haversine');
-      return calculateHaversineDistance(pickupLat, pickupLng, dropoffLat, dropoffLng);
+      return estimateRoadRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
     }
   } catch (error) {
-    logger.warn(`OSRM routing timed out or failed (${error.message}). Using approximate fallback (FR-RM-7).`);
-    return calculateHaversineDistance(pickupLat, pickupLng, dropoffLat, dropoffLng);
+    logger.warn(`OSRM routing timed out or failed (${error.message}). Using approximate fallback (FR-RT-5).`);
+    return estimateRoadRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
   }
 }
 
 module.exports = {
   getRoute,
   calculateHaversineDistance,
+  estimateRoadRoute,
 };

@@ -4,7 +4,8 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/theme/app_shapes.dart';
-import '../../core/services/app_state_provider.dart';
+import '../../core/state/app_state_provider.dart';
+import '../../core/state/auth_provider.dart';
 import '../../core/localization/app_localizations.dart';
 
 class WelcomeLanguageRoleScreen extends StatefulWidget {
@@ -24,9 +25,10 @@ class _WelcomeLanguageRoleScreenState extends State<WelcomeLanguageRoleScreen> {
   @override
   Widget build(BuildContext context) {
     final state = Provider.of<AppStateProvider>(context);
+    final auth = Provider.of<AuthProvider>(context);
     final l10n = AppLocalizations.of(context);
     final isUrdu = state.isUrdu;
-    final selectedRole = state.currentRole;
+    final selectedRole = auth.selectedRole;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -141,7 +143,7 @@ class _WelcomeLanguageRoleScreenState extends State<WelcomeLanguageRoleScreen> {
                   Expanded(
                     child: _buildOptionCard(
                       isSelected: !isUrdu,
-                      onTap: () => state.setLocale(const Locale('en')),
+                      onTap: () => state.setLanguage('en'),
                       leadingBadge: 'EN',
                       title: 'English',
                       subtitle: 'Standard logistics',
@@ -151,7 +153,7 @@ class _WelcomeLanguageRoleScreenState extends State<WelcomeLanguageRoleScreen> {
                   Expanded(
                     child: _buildOptionCard(
                       isSelected: isUrdu,
-                      onTap: () => state.setLocale(const Locale('ur')),
+                      onTap: () => state.setLanguage('ur'),
                       leadingBadge: 'اردو',
                       title: 'اردو (Urdu)',
                       subtitle: 'مکمل اردو انٹرفیس',
@@ -193,7 +195,7 @@ class _WelcomeLanguageRoleScreenState extends State<WelcomeLanguageRoleScreen> {
                     child: _buildRoleCard(
                       key: const Key('cargoOwnerRoleCard'),
                       isSelected: selectedRole == UserRole.cargoOwner,
-                      onTap: () => state.setRole(UserRole.cargoOwner),
+                      onTap: () => auth.selectRole(UserRole.cargoOwner),
                       icon: Icons.inventory_2,
                       title: 'Cargo Owner',
                       titleUrdu: 'کارگو مالک',
@@ -205,7 +207,7 @@ class _WelcomeLanguageRoleScreenState extends State<WelcomeLanguageRoleScreen> {
                     child: _buildRoleCard(
                       key: const Key('truckDriverRoleCard'),
                       isSelected: selectedRole == UserRole.driver,
-                      onTap: () => state.setRole(UserRole.driver),
+                      onTap: () => auth.selectRole(UserRole.driver),
                       icon: Icons.local_shipping,
                       title: 'Truck Driver',
                       titleUrdu: 'ٹرک ڈرائیور',

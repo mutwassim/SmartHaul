@@ -16,8 +16,9 @@ export class ApiError extends Error {
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('smarthaul_token') : null;
 
+  // A multipart body sets its own Content-Type (with the boundary)
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   };
 
@@ -52,4 +53,5 @@ export const api = {
   put: <T>(endpoint: string, body?: any) =>
     request<T>(endpoint, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
+  upload: <T>(endpoint: string, body: FormData) => request<T>(endpoint, { method: 'POST', body }),
 };

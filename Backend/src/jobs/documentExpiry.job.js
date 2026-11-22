@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 
 /**
  * Daily Document Expiry Validation Job
- * Requirement: BR-29, FR-SV-15, UC-13 alternative flow 13.2
+ * Requirement: BR-29, FR-SV-12, UC-13 alternative flow 13.2
  */
 async function runDocumentExpiryCheck() {
   try {
@@ -33,7 +33,7 @@ async function runDocumentExpiryCheck() {
         data: { verificationStatus: 'PENDING' },
       });
 
-      // If user was VERIFIED, revert to PENDING to suspend bidding permissions (BR-29, FR-SV-15)
+      // If user was VERIFIED, revert to PENDING to suspend bidding permissions (BR-29, FR-SV-12)
       if (doc.user.accountStatus === ACCOUNT_STATUS.VERIFIED) {
         await prisma.user.update({
           where: { id: doc.userId },

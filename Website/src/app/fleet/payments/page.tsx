@@ -90,7 +90,7 @@ export default function FleetPaymentsPage() {
       setSuccessMsg(null);
 
       await api.post(`/payments/${disputePayment.id}/dispute`, {
-        reason: disputeReason,
+        description: disputeReason,
       });
 
       setSuccessMsg(`Payment frozen and dispute raised with SmartHaul Administration (BR-26).`);
@@ -254,8 +254,8 @@ export default function FleetPaymentsPage() {
         </h1>
         <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0', fontSize: '0.9rem' }}>
           {isRTL
-            ? 'آف لائن ادائیگیوں، جزوی وصولیوں اور متنازعہ واجبات کا مکمل حساب کتاب (CON-8, FR-PM-6)'
-            : 'Non-custodial offline payment tracking, partial settlement recording, and dispute arbitration (CON-8, FR-PM-6).'}
+            ? 'آف لائن ادائیگیوں، جزوی وصولیوں اور متنازعہ واجبات کا مکمل حساب کتاب (CON-8, FR-PM-3)'
+            : 'Non-custodial offline payment tracking, partial settlement recording, and dispute arbitration (CON-8, FR-PM-3).'}
         </p>
       </div>
 

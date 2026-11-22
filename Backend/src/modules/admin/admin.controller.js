@@ -1,6 +1,8 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const prisma = require('../../config/db');
 const { logAdminAction } = require('../../services/audit.service');
+const { hashToken } = require('../../utils/token');
 const { generateSignedReadUrl } = require('../../services/storage.service');
 const { dispatchNotification } = require('../../services/fcm.service');
 const { getPaginationParams, buildPaginationMeta } = require('../../utils/pagination');
@@ -13,9 +15,12 @@ const {
   COMPLAINT_CATEGORIES,
 } = require('../../config/constants');
 
+const COMPLAINT_STATUSES = ['PENDING', 'UNDER_REVIEW', 'RESOLVED', 'REJECTED', 'WITHDRAWN'];
+const OPEN_COMPLAINT_STATUSES = ['PENDING', 'UNDER_REVIEW'];
+
 /**
  * Provision new administrator account
- * Requirement: FR-AD-4 (Administrators are provisioned, not self-registered)
+ * Requirement: FR-AD-1 (Administrators are provisioned, not self-registered)
  */
 async function provisionAdmin(req, res, next) {
   try {
@@ -65,7 +70,7 @@ async function provisionAdmin(req, res, next) {
       ipAddress: req.ip,
     });
 
-    return successResponse(res, admin, 'Administrator account provisioned successfully (FR-AD-4)', 201);
+    return successResponse(res, admin, 'Administrator account provisioned successfully (FR-AD-1)', 201);
   } catch (error) {
     next(error);
   }
@@ -73,40 +78,56 @@ async function provisionAdmin(req, res, next) {
 
 /**
  * Display pending verification queue
- * Requirement: FR-AD-5, UC-13
+ * Requirement: FR-AD-2, UC-13
  */
 async function getVerificationQueue(req, res, next) {
   try {
+    const { page, limit, skip } = getPaginationParams(req.query);
     const pendingUsers = await prisma.user.findMany({
       where: {
         accountStatus: ACCOUNT_STATUS.PENDING,
         role: { in: [ROLES.DRIVER, ROLES.FLEET_OWNER] },
       },
-      include: {
-        documents: true,
-        driverVehicle: true,
-        fleetVehicles: true,
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        phone: true,
+        email: true,
+        createdAt: true,
+        documents: { select: { createdAt: true } },
+        driverVehicle: { select: { id: true } },
+        fleetVehicles: { select: { id: true } },
       },
-      orderBy: { createdAt: 'asc' }, // Ordered by submission time
     });
 
+    // Submission time is the last document upload, not the registration time (C-53).
+    // Oldest submission first; users with no documents yet fall back to registration time.
+    const withSubmission = pendingUsers.map((u) => ({
+      ...u,
+      submittedAt: u.documents.length
+        ? new Date(Math.max(...u.documents.map((d) => d.createdAt.getTime())))
+        : u.createdAt,
+    }));
+    withSubmission.sort((a, b) => a.submittedAt - b.submittedAt);
+
     const now = new Date();
-    const queue = pendingUsers.map((u) => {
-      const elapsedHours = Math.round((now - u.createdAt) / (1000 * 60 * 60));
+    const queue = withSubmission.slice(skip, skip + limit).map((u) => {
+      const elapsedHours = Math.round((now - u.submittedAt) / (1000 * 60 * 60));
       return {
         id: u.id,
         name: u.name,
         role: u.role,
         phone: u.phone,
         email: u.email,
-        submittedAt: u.createdAt,
+        submittedAt: u.submittedAt,
         elapsedWaitingHours: elapsedHours,
         documentsCount: u.documents.length,
         hasVehicles: u.driverVehicle ? true : u.fleetVehicles.length > 0,
       };
     });
 
-    return successResponse(res, queue, 'Verification queue retrieved (FR-AD-5)');
+    return successResponse(res, queue, 'Verification queue retrieved (FR-AD-2)', 200, buildPaginationMeta(withSubmission.length, page, limit));
   } catch (error) {
     next(error);
   }
@@ -114,7 +135,7 @@ async function getVerificationQueue(req, res, next) {
 
 /**
  * Review uploaded documents for user with time-limited signed links
- * Requirement: FR-AD-6, SEC-8, SI-4.2
+ * Requirement: FR-AD-3, SEC-8, SI-4.2
  */
 async function getUserVerificationDocuments(req, res, next) {
   try {
@@ -167,7 +188,7 @@ async function getUserVerificationDocuments(req, res, next) {
 
 /**
  * Approve or Reject verification
- * Requirement: FR-AD-7, BR-3, BR-28, SEC-15
+ * Requirement: FR-AD-4, BR-3, BR-28, SEC-15
  */
 async function processVerificationDecision(req, res, next) {
   try {
@@ -182,32 +203,60 @@ async function processVerificationDecision(req, res, next) {
       return errorResponse(res, 'USER_NOT_FOUND', 'User not found', 404);
     }
 
+    // Only drivers and fleet owners go through verification (BR-3)
+    if (user.role !== ROLES.DRIVER && user.role !== ROLES.FLEET_OWNER) {
+      return errorResponse(res, 'ROLE_NOT_VERIFIABLE', 'Only driver and fleet owner accounts are verified.', 400);
+    }
+
+    // A decision is only valid on a request that is waiting for one
+    if (user.accountStatus !== ACCOUNT_STATUS.PENDING) {
+      return errorResponse(
+        res,
+        'NOT_PENDING_VERIFICATION',
+        `This account is ${user.accountStatus} and has no pending verification request.`,
+        409
+      );
+    }
+
     if (decision === 'REJECTED' && !rejectionReason) {
       return errorResponse(
         res,
         'REASON_REQUIRED',
-        'A recorded reason is mandatory when rejecting a verification request (FR-AD-7).',
+        'A recorded reason is mandatory when rejecting a verification request (FR-AD-4).',
         400
       );
     }
 
+    const pendingDocs = await prisma.verificationDocument.count({
+      where: { userId, verificationStatus: 'PENDING' },
+    });
+    if (pendingDocs === 0) {
+      return errorResponse(res, 'NO_DOCUMENTS_TO_REVIEW', 'The user has no submitted documents to review.', 409);
+    }
+
     const newStatus = decision === 'APPROVED' ? ACCOUNT_STATUS.VERIFIED : ACCOUNT_STATUS.REJECTED;
 
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { id: userId },
+    // Compare-and-set: two administrators deciding at once cannot both succeed
+    const decided = await prisma.$transaction(async (tx) => {
+      const moved = await tx.user.updateMany({
+        where: { id: userId, accountStatus: ACCOUNT_STATUS.PENDING },
         data: { accountStatus: newStatus },
-      }),
-      prisma.verificationDocument.updateMany({
-        where: { userId },
+      });
+      if (moved.count === 0) return false;
+      await tx.verificationDocument.updateMany({
+        where: { userId, verificationStatus: 'PENDING' },
         data: {
           verificationStatus: decision,
           rejectionReason: decision === 'REJECTED' ? rejectionReason : null,
           verifiedByAdminId: req.user.id,
           verifiedAt: new Date(),
         },
-      }),
-    ]);
+      });
+      return true;
+    });
+    if (!decided) {
+      return errorResponse(res, 'NOT_PENDING_VERIFICATION', 'Another administrator has already decided this request.', 409);
+    }
 
     // Record immutable admin audit log (BR-28, SEC-15)
     await logAdminAction({
@@ -242,7 +291,7 @@ async function processVerificationDecision(req, res, next) {
 
 /**
  * Suspend or Reinstate User Account
- * Requirement: FR-AD-9, BR-13, BR-28, SEC-15
+ * Requirement: FR-AD-5, BR-13, BR-28, SEC-15
  */
 async function updateUserAccountStatus(req, res, next) {
   try {
@@ -261,17 +310,48 @@ async function updateUserAccountStatus(req, res, next) {
       return errorResponse(res, 'CANNOT_SUSPEND_ADMIN', 'Cannot modify administrator status via this endpoint', 400);
     }
 
-    // If suspending, withdraw open bids (FR-AD-9)
-    if (status === ACCOUNT_STATUS.SUSPENDED) {
-      await prisma.bid.updateMany({
-        where: { bidderId: userId, status: BID_STATUS.ACTIVE },
-        data: { status: BID_STATUS.WITHDRAWN },
-      });
+    const suspending = status === ACCOUNT_STATUS.SUSPENDED;
+    let targetStatus = status;
+
+    if (suspending) {
+      if (user.accountStatus === ACCOUNT_STATUS.SUSPENDED) {
+        return errorResponse(res, 'ALREADY_SUSPENDED', 'This account is already suspended.', 409);
+      }
+    } else {
+      // Reinstating restores the status held before suspension, so verification cannot be bypassed
+      if (user.accountStatus !== ACCOUNT_STATUS.SUSPENDED) {
+        return errorResponse(res, 'NOT_SUSPENDED', 'Only a suspended account can be reinstated.', 409);
+      }
+      targetStatus =
+        user.statusBeforeSuspension ||
+        (user.role === ROLES.CARGO_OWNER ? ACCOUNT_STATUS.ACTIVE : ACCOUNT_STATUS.PENDING);
+      if (status !== targetStatus) {
+        return errorResponse(
+          res,
+          'STATUS_MISMATCH',
+          `Reinstatement restores the previous status (${targetStatus}).`,
+          409
+        );
+      }
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { accountStatus: status },
+    // Suspension withdraws open bids (FR-AD-5) and ends every session of the user (SEC-4), in one step
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      if (suspending) {
+        await tx.bid.updateMany({
+          where: { bidderId: userId, status: BID_STATUS.ACTIVE },
+          data: { status: BID_STATUS.WITHDRAWN },
+        });
+      }
+      return tx.user.update({
+        where: { id: userId },
+        data: {
+          accountStatus: targetStatus,
+          statusBeforeSuspension: suspending ? user.accountStatus : null,
+          ...(suspending ? { tokenVersion: { increment: 1 } } : {}),
+        },
+        select: { id: true, role: true, name: true, accountStatus: true },
+      });
     });
 
     // Immutable audit log
@@ -281,7 +361,7 @@ async function updateUserAccountStatus(req, res, next) {
       targetType: 'USER',
       targetId: userId,
       previousState: { accountStatus: user.accountStatus },
-      newState: { accountStatus: status },
+      newState: { accountStatus: targetStatus },
       reason,
       ipAddress: req.ip,
     });
@@ -291,10 +371,104 @@ async function updateUserAccountStatus(req, res, next) {
       recipientId: userId,
       type: 'ACCOUNT_SUSPENDED_OR_REINSTATED',
       title: `Account ${status === ACCOUNT_STATUS.SUSPENDED ? 'Suspended' : 'Reinstated'}`,
-      message: `Your account status has been updated to ${status}. Reason: ${reason}`,
+      message: `Your account status has been updated to ${targetStatus}. Reason: ${reason}`,
     });
 
-    return successResponse(res, updatedUser, `Account status updated to ${status} (FR-AD-9)`);
+    return successResponse(res, updatedUser, `Account status updated to ${targetStatus} (FR-AD-5)`);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Issue a one-time password reset token for a user who requested recovery.
+ * Replaces returning the token to the requester (no SMS/email channel exists). Admin gives it to the verified owner.
+ * Requirement: FR-SV-4, SEC-1
+ */
+async function issuePasswordResetToken(req, res, next) {
+  try {
+    const { id: userId } = req.params;
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return errorResponse(res, 'USER_NOT_FOUND', 'User not found', 404);
+    }
+
+    if (user.role === ROLES.ADMIN) {
+      return errorResponse(res, 'CANNOT_RESET_ADMIN', 'Administrator passwords cannot be reset via this endpoint', 400);
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min expiry
+
+    // Only the hash is stored; earlier unused tokens for this user stop working
+    await prisma.$transaction([
+      prisma.passwordResetToken.updateMany({ where: { userId, isUsed: false }, data: { isUsed: true } }),
+      prisma.passwordResetToken.create({
+        data: { userId, token: hashToken(resetToken), expiresAt },
+      }),
+    ]);
+
+    await logAdminAction({
+      adminId: req.user.id,
+      action: 'ISSUE_PASSWORD_RESET_TOKEN',
+      targetType: 'USER',
+      targetId: userId,
+      reason: req.body.reason,
+      ipAddress: req.ip,
+    });
+
+    return successResponse(res, { resetToken, expiresAt }, 'Password reset token issued. Give it to the account owner.');
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * List platform users with role, status and search filters
+ * Requirement: FR-SV-11
+ */
+async function listUsers(req, res, next) {
+  try {
+    const { page, limit, skip } = getPaginationParams(req.query);
+    const { role, accountStatus, search } = req.query;
+
+    const whereClause = {
+      ...(Object.values(ROLES).includes(role) ? { role } : {}),
+      ...(Object.values(ACCOUNT_STATUS).includes(accountStatus) ? { accountStatus } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, users] = await Promise.all([
+      prisma.user.count({ where: whereClause }),
+      prisma.user.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          role: true,
+          name: true,
+          email: true,
+          phone: true,
+          accountStatus: true,
+          statusBeforeSuspension: true,
+          createdAt: true,
+          lastLoginAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return successResponse(res, users, 'Users retrieved', 200, buildPaginationMeta(total, page, limit));
   } catch (error) {
     next(error);
   }
@@ -302,7 +476,7 @@ async function updateUserAccountStatus(req, res, next) {
 
 /**
  * Monitor exceptional shipments (delayed, unassigned, disputed)
- * Requirement: FR-AD-12
+ * Requirement: FR-AD-8
  */
 async function getExceptionalShipments(req, res, next) {
   try {
@@ -327,14 +501,20 @@ async function getExceptionalShipments(req, res, next) {
       },
       include: {
         cargoOwner: { select: { id: true, name: true, phone: true } },
-        trip: { include: { driver: true, vehicle: true } },
+        trip: {
+          include: {
+            driver: { select: { id: true, name: true, phone: true } },
+            vehicle: true,
+          },
+        },
         complaints: { where: { status: { in: ['PENDING', 'UNDER_REVIEW'] } } },
       },
       orderBy: { updatedAt: 'desc' },
       take: 100,
+      omit: { routePolyline: true }, // C-33
     });
 
-    return successResponse(res, shipments, 'Exceptional shipments retrieved (FR-AD-12)');
+    return successResponse(res, shipments, 'Exceptional shipments retrieved (FR-AD-8)');
   } catch (error) {
     next(error);
   }
@@ -342,12 +522,19 @@ async function getExceptionalShipments(req, res, next) {
 
 /**
  * List submitted complaints
- * Requirement: FR-AD-13
+ * Requirement: FR-AD-9
  */
 async function listComplaints(req, res, next) {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
     const { status, category } = req.query;
+
+    if (status && !COMPLAINT_STATUSES.includes(status)) {
+      return errorResponse(res, 'INVALID_STATUS_FILTER', `Status must be one of ${COMPLAINT_STATUSES.join(', ')}`, 400);
+    }
+    if (category && !Object.prototype.hasOwnProperty.call(COMPLAINT_CATEGORIES, category)) {
+      return errorResponse(res, 'INVALID_CATEGORY_FILTER', 'Category is not one of the complaint categories (Table C-4)', 400);
+    }
 
     const whereClause = {
       ...(status ? { status } : {}),
@@ -383,12 +570,12 @@ async function listComplaints(req, res, next) {
 
 /**
  * Resolve complaint & payment dispute
- * Requirement: FR-AD-14, FR-AD-15, FR-AD-16, BR-23, BR-25, BR-28
+ * Requirement: FR-AD-10, FR-AD-10, FR-AD-11, BR-23, BR-25, BR-28
  */
 async function resolveComplaint(req, res, next) {
   try {
     const { id: complaintId } = req.params;
-    const { decision, adminRemarks, adjustedFare, adjustedPaymentStatus } = req.body;
+    const { decision, adminRemarks, adjustedFare, adjustedPaymentStatus, waivePenalty } = req.body;
 
     const complaint = await prisma.complaint.findUnique({
       where: { id: complaintId },
@@ -401,10 +588,69 @@ async function resolveComplaint(req, res, next) {
 
     const isPaymentDispute = complaint.category === COMPLAINT_CATEGORIES.PAYMENT_DISPUTE;
 
-    await prisma.$transaction(async (tx) => {
-      // 1. Update complaint status and remarks (FR-AD-15)
-      await tx.complaint.update({
-        where: { id: complaintId },
+    // A resolved or withdrawn complaint is final: resolving it again would adjust the fare again (C-40)
+    if (!OPEN_COMPLAINT_STATUSES.includes(complaint.status)) {
+      return errorResponse(
+        res,
+        'COMPLAINT_ALREADY_CLOSED',
+        `This complaint is already ${complaint.status} and cannot be resolved again.`,
+        409
+      );
+    }
+
+    // Adjustments belong to a resolved payment dispute only
+    const hasAdjustment = adjustedFare !== undefined || adjustedPaymentStatus !== undefined;
+    if (hasAdjustment && !(isPaymentDispute && decision === 'RESOLVED')) {
+      return errorResponse(
+        res,
+        'ADJUSTMENT_NOT_ALLOWED',
+        'A fare or payment status can be adjusted only when resolving a payment dispute.',
+        400
+      );
+    }
+
+    // Lifting a no-show penalty belongs to a resolved cancellation dispute only
+    const waiving = waivePenalty === true;
+    if (waiving && !(complaint.category === COMPLAINT_CATEGORIES.CANCELLATION_DISPUTE && decision === 'RESOLVED')) {
+      return errorResponse(
+        res,
+        'PENALTY_WAIVER_NOT_ALLOWED',
+        'A penalty can be waived only when resolving a cancellation dispute.',
+        400
+      );
+    }
+
+    let adjustment = null;
+    if (isPaymentDispute && complaint.shipment && complaint.shipment.paymentRecord) {
+      const pr = complaint.shipment.paymentRecord;
+      const fare = adjustedFare !== undefined ? adjustedFare : pr.agreedFare;
+      let received = pr.amountReceived;
+      const status = adjustedPaymentStatus !== undefined ? adjustedPaymentStatus : pr.status;
+      if (status === 'PAID') received = fare;
+      else if (status === 'PENDING') received = 0;
+      if (received > fare) {
+        return errorResponse(
+          res,
+          'AMOUNT_EXCEEDS_AGREED_FARE',
+          `The amount already received (PKR ${received}) exceeds the adjusted fare (PKR ${fare}). Adjust the payment status too.`,
+          400
+        );
+      }
+      if (status === 'PARTIAL' && (received <= 0 || received >= fare)) {
+        return errorResponse(
+          res,
+          'INVALID_PARTIAL_AMOUNT',
+          'A Partial payment needs an amount received between 0 and the fare.',
+          400
+        );
+      }
+      adjustment = { fare, received, status };
+    }
+
+    const closed = await prisma.$transaction(async (tx) => {
+      // 1. Update complaint status and remarks (FR-AD-10). Conditional on it still being open.
+      const updated = await tx.complaint.updateMany({
+        where: { id: complaintId, status: { in: OPEN_COMPLAINT_STATUSES } },
         data: {
           status: decision,
           adminRemarks,
@@ -412,18 +658,36 @@ async function resolveComplaint(req, res, next) {
           resolvedAt: new Date(),
         },
       });
+      if (updated.count !== 1) return false;
 
-      // 2. If payment dispute, unfreeze and conditionally amend fare (FR-AD-16, BR-23)
+      // The complainant's no-show penalty on this shipment is lifted; a suspension stays until an admin reinstates
+      if (waiving) {
+        await tx.driverPenalty.updateMany({
+          where: { shipmentId: complaint.shipmentId, userId: complaint.submitterId, status: 'ACTIVE' },
+          data: { status: 'WAIVED', waivedAt: new Date() },
+        });
+      }
+
+      // 2. If payment dispute, unfreeze (only when no other dispute is open) and amend fare/status (FR-AD-11, BR-23)
       if (isPaymentDispute && complaint.shipment && complaint.shipment.paymentRecord) {
         const paymentRecord = complaint.shipment.paymentRecord;
         const previousFare = paymentRecord.agreedFare;
 
+        const stillOpen = await tx.complaint.count({
+          where: {
+            shipmentId: complaint.shipmentId,
+            category: COMPLAINT_CATEGORIES.PAYMENT_DISPUTE,
+            status: { in: OPEN_COMPLAINT_STATUSES },
+          },
+        });
+
         await tx.paymentRecord.update({
           where: { id: paymentRecord.id },
           data: {
-            isFrozen: false,
-            ...(adjustedFare ? { agreedFare: adjustedFare } : {}),
-            ...(adjustedPaymentStatus ? { status: adjustedPaymentStatus } : {}),
+            ...(stillOpen === 0 ? { isFrozen: false } : {}),
+            ...(hasAdjustment
+              ? { agreedFare: adjustment.fare, amountReceived: adjustment.received, status: adjustment.status }
+              : {}),
           },
         });
 
@@ -432,8 +696,8 @@ async function resolveComplaint(req, res, next) {
           data: {
             paymentRecordId: paymentRecord.id,
             previousStatus: paymentRecord.status,
-            newStatus: adjustedPaymentStatus || paymentRecord.status,
-            amountReceived: paymentRecord.amountReceived,
+            newStatus: adjustment.status,
+            amountReceived: adjustment.received,
             changedById: req.user.id,
             note: `Administrator resolved dispute: ${adminRemarks}`,
           },
@@ -445,8 +709,8 @@ async function resolveComplaint(req, res, next) {
           action: 'RESOLVE_PAYMENT_DISPUTE',
           targetType: 'PAYMENT',
           targetId: paymentRecord.id,
-          previousState: { agreedFare: previousFare, status: paymentRecord.status },
-          newState: { agreedFare: adjustedFare || previousFare, status: adjustedPaymentStatus || paymentRecord.status },
+          previousState: { agreedFare: previousFare, status: paymentRecord.status, amountReceived: paymentRecord.amountReceived },
+          newState: { agreedFare: adjustment.fare, status: adjustment.status, amountReceived: adjustment.received },
           reason: adminRemarks,
           ipAddress: req.ip,
         });
@@ -463,9 +727,14 @@ async function resolveComplaint(req, res, next) {
           ipAddress: req.ip,
         });
       }
+      return true;
     });
 
-    // Notify submitter and counterparty (FR-NC-11)
+    if (!closed) {
+      return errorResponse(res, 'COMPLAINT_ALREADY_CLOSED', 'This complaint was closed by someone else a moment ago.', 409);
+    }
+
+    // Notify submitter and counterparty (FR-NC-10)
     await dispatchNotification({
       recipientId: complaint.submitterId,
       type: 'COMPLAINT_STATUS_CHANGED',
@@ -484,7 +753,7 @@ async function resolveComplaint(req, res, next) {
       });
     }
 
-    return successResponse(res, null, `Complaint ${decision.toLowerCase()} successfully (FR-AD-14)`);
+    return successResponse(res, null, `Complaint ${decision.toLowerCase()} successfully (FR-AD-10)`);
   } catch (error) {
     next(error);
   }
@@ -492,7 +761,7 @@ async function resolveComplaint(req, res, next) {
 
 /**
  * View immutable admin audit trail
- * Requirement: FR-AD-19, BR-28, SEC-15
+ * Requirement: FR-AD-13, BR-28, SEC-15
  */
 async function getAuditLogs(req, res, next) {
   try {
@@ -525,7 +794,7 @@ async function getAuditLogs(req, res, next) {
 
 /**
  * Broadcast platform announcement
- * Requirement: FR-AD-20
+ * Requirement: FR-AD-14
  */
 async function broadcastAnnouncement(req, res, next) {
   try {
@@ -559,7 +828,7 @@ async function broadcastAnnouncement(req, res, next) {
       ipAddress: req.ip,
     });
 
-    return successResponse(res, { recipientCount: users.length }, 'Announcement broadcasted successfully (FR-AD-20)');
+    return successResponse(res, { recipientCount: users.length }, 'Announcement broadcasted successfully (FR-AD-14)');
   } catch (error) {
     next(error);
   }
@@ -567,7 +836,7 @@ async function broadcastAnnouncement(req, res, next) {
 
 /**
  * List all shipments platform-wide with status filter and search
- * Requirement: FR-AD-10
+ * Requirement: FR-AD-6
  */
 async function listAllShipments(req, res, next) {
   try {
@@ -582,7 +851,6 @@ async function listAllShipments(req, res, next) {
               { shipmentNumber: { contains: search, mode: 'insensitive' } },
               { pickupAddress: { contains: search, mode: 'insensitive' } },
               { dropoffAddress: { contains: search, mode: 'insensitive' } },
-              { cargoType: { contains: search, mode: 'insensitive' } },
             ],
           }
         : {}),
@@ -594,6 +862,7 @@ async function listAllShipments(req, res, next) {
         where: whereClause,
         skip,
         take: limit,
+        omit: { routePolyline: true }, // C-33
         include: {
           cargoOwner: { select: { id: true, name: true, phone: true, email: true } },
           trip: {
@@ -613,7 +882,7 @@ async function listAllShipments(req, res, next) {
     return successResponse(
       res,
       shipments,
-      'Platform shipments retrieved (FR-AD-10)',
+      'Platform shipments retrieved (FR-AD-6)',
       200,
       buildPaginationMeta(total, page, limit)
     );
@@ -628,6 +897,8 @@ module.exports = {
   getUserVerificationDocuments,
   processVerificationDecision,
   updateUserAccountStatus,
+  issuePasswordResetToken,
+  listUsers,
   listAllShipments,
   getExceptionalShipments,
   listComplaints,

@@ -78,7 +78,7 @@ export default function AdminAnnouncementsPage() {
         targetRole,
       });
 
-      setSuccessMsg(`Announcement successfully broadcasted to ${res.recipientCount || 'all target'} users (FR-AD-20)!`);
+      setSuccessMsg(`Announcement successfully broadcasted to ${res.recipientCount || 'all target'} users (FR-AD-14)!`);
       setTitle('');
       setMessage('');
       await fetchHistory();
@@ -161,8 +161,8 @@ export default function AdminAnnouncementsPage() {
         </h1>
         <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0', fontSize: '0.9rem' }}>
           {isRTL
-            ? 'پلیٹ فارم کے تمام صارفین یا مخصوص کرداروں کو فوری اعلانات اور نوٹیفیکیشنز ارسال کریں (FR-AD-20)'
-            : 'Broadcast system-wide notices or role-targeted announcements via push & in-app inbox (FR-AD-20).'}
+            ? 'پلیٹ فارم کے تمام صارفین یا مخصوص کرداروں کو فوری اعلانات اور نوٹیفیکیشنز ارسال کریں (FR-AD-14)'
+            : 'Broadcast system-wide notices or role-targeted announcements via push & in-app inbox (FR-AD-14).'}
         </p>
       </div>
 
@@ -312,7 +312,7 @@ export default function AdminAnnouncementsPage() {
               }}
             >
               <Send size={16} />
-              {loading ? 'Broadcasting...' : 'Broadcast Announcement (FR-AD-20)'}
+              {loading ? 'Broadcasting...' : 'Broadcast Announcement (FR-AD-14)'}
             </button>
           </div>
         </form>

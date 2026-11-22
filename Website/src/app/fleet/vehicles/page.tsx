@@ -158,7 +158,7 @@ export default function FleetVehiclesPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-            Vehicle Register (FR-FO-3 to FR-FO-6)
+            Vehicle Register (FR-FO-3 to FR-FO-5)
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
             Maintain fleet trucks, rated capacities, body types, and availability states for matching (BR-4, BR-30)

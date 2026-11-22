@@ -57,7 +57,7 @@ export default function AdminDashboardPage() {
         </p>
       </div>
 
-      {/* KPI Cards Grid (UI-21, FR-AD-17) */}
+      {/* KPI Cards Grid (UI-21, FR-AD-12) */}
       <div
         style={{
           display: 'grid',
@@ -107,7 +107,7 @@ export default function AdminDashboardPage() {
         />
       </div>
 
-      {/* Exceptional Shipments Attention Section (FR-AD-12) */}
+      {/* Exceptional Shipments Attention Section (FR-AD-8) */}
       <div className="glass-card" style={{ padding: '24px' }}>
         <div
           style={{
@@ -119,7 +119,7 @@ export default function AdminDashboardPage() {
         >
           <div>
             <h2 style={{ fontSize: '1.125rem', fontWeight: 600 }}>
-              Exceptional Shipments Attention Queue (FR-AD-12)
+              Exceptional Shipments Attention Queue (FR-AD-8)
             </h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '2px' }}>
               Surfacing delayed deliveries, unassigned bookings, and shipments with open disputes

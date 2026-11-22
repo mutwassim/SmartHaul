@@ -168,8 +168,8 @@ export default function AdminShipmentsPage() {
           </h1>
           <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0', fontSize: '0.9rem' }}>
             {isRTL
-              ? 'پلیٹ فارم پر موجود تمام ترسیلات کی مکمل نگرانی، تلاش اور استثنائی حالات کا معائنہ (FR-AD-10, FR-AD-12)'
-              : 'Search, filter, inspect and monitor all platform freight operations and exceptions (FR-AD-10, FR-AD-12).'}
+              ? 'پلیٹ فارم پر موجود تمام ترسیلات کی مکمل نگرانی، تلاش اور استثنائی حالات کا معائنہ (FR-AD-6, FR-AD-8)'
+              : 'Search, filter, inspect and monitor all platform freight operations and exceptions (FR-AD-6, FR-AD-8).'}
           </p>
         </div>
 
@@ -298,7 +298,7 @@ export default function AdminShipmentsPage() {
           }}
         >
           <AlertTriangle size={16} />
-          {isRTL ? 'صرف استثنائی و تاخیر شدہ دکھائیں (FR-AD-12)' : 'Exceptions Queue Only (FR-AD-12)'}
+          {isRTL ? 'صرف استثنائی و تاخیر شدہ دکھائیں (FR-AD-8)' : 'Exceptions Queue Only (FR-AD-8)'}
         </button>
       </div>
 

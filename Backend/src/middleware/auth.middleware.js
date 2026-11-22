@@ -1,5 +1,5 @@
 const prisma = require('../config/db');
-const { verifyToken } = require('../utils/token');
+const { verifyToken, isTokenRevoked } = require('../utils/token');
 const { errorResponse } = require('../utils/response');
 const { ACCOUNT_STATUS } = require('../config/constants');
 
@@ -20,16 +20,17 @@ async function authenticate(req, res, next) {
     try {
       decoded = verifyToken(token);
     } catch (err) {
-      if (err.message === 'TOKEN_REVOKED') {
-        return errorResponse(res, 'AUTH_TOKEN_REVOKED', 'Session has been invalidated. Please log in again.', 401);
-      }
       if (err.message === 'SESSION_MAX_LIFETIME_EXCEEDED') {
         return errorResponse(res, 'AUTH_SESSION_EXPIRED', 'Maximum session duration (30 days) exceeded. Please log in again.', 401);
       }
       return errorResponse(res, 'AUTH_TOKEN_INVALID', 'Invalid or expired authentication token', 401);
     }
 
-    // Retrieve active user from database to ensure up-to-date account status (FR-SV-16)
+    if (await isTokenRevoked(token)) {
+      return errorResponse(res, 'AUTH_TOKEN_REVOKED', 'Session has been invalidated. Please log in again.', 401);
+    }
+
+    // Retrieve active user from database to ensure up-to-date account status (FR-SV-11)
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
       select: {
@@ -39,6 +40,7 @@ async function authenticate(req, res, next) {
         phone: true,
         email: true,
         accountStatus: true,
+        tokenVersion: true,
         preferredLanguage: true,
         driverFleetLink: {
           select: {
@@ -50,6 +52,11 @@ async function authenticate(req, res, next) {
 
     if (!user) {
       return errorResponse(res, 'AUTH_USER_NOT_FOUND', 'User account does not exist', 401);
+    }
+
+    // A password reset or suspension ends every earlier session (SEC-4)
+    if ((decoded.tv || 0) !== user.tokenVersion) {
+      return errorResponse(res, 'AUTH_TOKEN_REVOKED', 'Session has been invalidated. Please log in again.', 401);
     }
 
     // Attach user and raw token to request

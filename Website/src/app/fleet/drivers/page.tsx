@@ -232,7 +232,7 @@ export default function FleetDriversPage() {
           <p style={{ color: 'var(--text-muted)', margin: '0.25rem 0 0 0', fontSize: '0.9rem' }}>
             {isRTL
               ? 'اپنے بیڑے کے تمام مصدقہ ڈرائیوروں کا انتظام کریں اور نئے ڈرائیور شامل کریں۔'
-              : 'Manage employed drivers, track ratings and link verified drivers to your fleet (FR-FO-7).'}
+              : 'Manage employed drivers, track ratings and link verified drivers to your fleet (FR-FO-6).'}
           </p>
         </div>
 

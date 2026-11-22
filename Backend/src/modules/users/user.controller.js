@@ -1,7 +1,10 @@
 const prisma = require('../../config/db');
+const { logAuthEvent } = require('../../services/audit.service');
 const { uploadVerificationDocument, generateSignedReadUrl } = require('../../services/storage.service');
 const { successResponse, errorResponse } = require('../../utils/response');
 const { ROLES, ACCOUNT_STATUS } = require('../../config/constants');
+
+const MAX_DOCUMENTS_PER_USER = 20;
 
 /**
  * Get current user profile
@@ -53,7 +56,7 @@ async function getProfile(req, res, next) {
 
 /**
  * Update user profile
- * Requirement: FR-CO-1, FR-DR-1, FR-FO-2
+ * Requirement: FR-CO-1, FR-DR-2, FR-FO-2
  */
 async function updateProfile(req, res, next) {
   try {
@@ -69,9 +72,17 @@ async function updateProfile(req, res, next) {
       }
     }
 
+    // A verified driver or fleet owner who changes their name must be verified again (BR-3)
+    const needsReverification =
+      name &&
+      name !== req.user.name &&
+      req.user.accountStatus === ACCOUNT_STATUS.VERIFIED &&
+      (req.user.role === ROLES.DRIVER || req.user.role === ROLES.FLEET_OWNER);
+
     const updated = await prisma.user.update({
       where: { id: req.user.id },
       data: {
+        ...(needsReverification ? { accountStatus: ACCOUNT_STATUS.PENDING } : {}),
         ...(name ? { name } : {}),
         ...(phone ? { phone } : {}),
         ...(businessName !== undefined ? { businessName } : {}),
@@ -93,6 +104,14 @@ async function updateProfile(req, res, next) {
       },
     });
 
+    await logAuthEvent({
+      userId: req.user.id,
+      identifier: req.user.email,
+      action: 'PROFILE_UPDATED',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return successResponse(res, updated, 'Profile updated successfully');
   } catch (error) {
     next(error);
@@ -101,7 +120,7 @@ async function updateProfile(req, res, next) {
 
 /**
  * Upload verification document
- * Requirement: FR-SV-11, SI-4.1, SI-4.3
+ * Requirement: FR-SV-8, SI-4.1, SI-4.3
  */
 async function uploadDocument(req, res, next) {
   try {
@@ -110,14 +129,17 @@ async function uploadDocument(req, res, next) {
     }
 
     const { documentType, expiryDate } = req.body;
-    if (!documentType) {
-      return errorResponse(res, 'DOC_TYPE_REQUIRED', 'documentType is required', 400);
+
+    // Upload quota per user (storage abuse)
+    const stored = await prisma.verificationDocument.count({ where: { userId: req.user.id } });
+    if (stored >= MAX_DOCUMENTS_PER_USER) {
+      return errorResponse(res, 'DOCUMENT_LIMIT_REACHED', `At most ${MAX_DOCUMENTS_PER_USER} documents can be stored per account.`, 409);
     }
 
-    // Save to object storage
+    // Save to file storage
     const uploadResult = await uploadVerificationDocument(req.file, req.user.id, documentType);
 
-    // Save metadata in database (FR-SV-14)
+    // Save metadata in database (FR-SV-10)
     const doc = await prisma.verificationDocument.create({
       data: {
         userId: req.user.id,
@@ -130,6 +152,22 @@ async function uploadDocument(req, res, next) {
         verificationStatus: 'PENDING',
       },
     });
+
+    await logAuthEvent({
+      userId: req.user.id,
+      identifier: req.user.email,
+      action: 'DOCUMENT_UPLOADED',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
+    // A rejected user who uploads again re-enters the verification queue (FR-AD-4)
+    if (req.user.accountStatus === ACCOUNT_STATUS.REJECTED) {
+      await prisma.user.updateMany({
+        where: { id: req.user.id, accountStatus: ACCOUNT_STATUS.REJECTED },
+        data: { accountStatus: ACCOUNT_STATUS.PENDING },
+      });
+    }
 
     return successResponse(
       res,
@@ -175,7 +213,7 @@ async function listDocuments(req, res, next) {
 }
 
 /**
- * Saved locations management (FR-CO-2)
+ * Saved locations management (FR-CO-1)
  */
 async function getSavedLocations(req, res, next) {
   try {

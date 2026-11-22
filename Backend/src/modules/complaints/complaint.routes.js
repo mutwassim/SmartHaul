@@ -3,6 +3,7 @@ const multer = require('multer');
 const router = express.Router();
 const complaintController = require('./complaint.controller');
 const { authenticate } = require('../../middleware/auth.middleware');
+const { blockSuspended } = require('../../middleware/verification.middleware');
 const { LIMITS } = require('../../config/constants');
 
 const upload = multer({
@@ -11,6 +12,7 @@ const upload = multer({
 });
 
 router.use(authenticate);
+router.use(blockSuspended);
 
 router.post('/', upload.array('attachments', LIMITS.MAX_COMPLAINT_IMAGES), complaintController.createComplaint);
 router.get('/', complaintController.listMyComplaints);

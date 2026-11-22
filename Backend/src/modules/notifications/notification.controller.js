@@ -5,7 +5,7 @@ const { successResponse, errorResponse } = require('../../utils/response');
 
 /**
  * List notifications for current user
- * Requirement: FR-NC-15
+ * Requirement: FR-NC-13
  */
 async function listNotifications(req, res, next) {
   try {
@@ -85,6 +85,12 @@ async function setDeviceToken(req, res, next) {
     const { token, platform } = req.body;
     if (!token) {
       return errorResponse(res, 'TOKEN_REQUIRED', 'Device token is required', 400);
+    }
+    if (typeof token !== 'string' || token.length < 20 || token.length > 4096) {
+      return errorResponse(res, 'INVALID_DEVICE_TOKEN', 'Device token format is invalid', 422);
+    }
+    if (platform !== undefined && !['android', 'ios', 'web'].includes(platform)) {
+      return errorResponse(res, 'INVALID_PLATFORM', 'Platform must be android, ios or web', 422);
     }
 
     const device = await registerDeviceToken(req.user.id, token, platform || 'android');

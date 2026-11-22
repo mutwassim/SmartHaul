@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { VEHICLE_TYPES } = require('../../config/constants');
+const { VEHICLE_TYPES, CARGO_TYPES } = require('../../config/constants');
 
 const vehicleTypeEnum = z.enum(Object.keys(VEHICLE_TYPES));
 
@@ -23,7 +23,7 @@ const createShipmentSchema = z.object({
   dropoffContactName: z.string().optional(),
   dropoffContactPhone: z.string().optional(),
 
-  cargoType: z.string().min(2, 'Cargo type is required'),
+  cargoType: z.enum(CARGO_TYPES, { errorMap: () => ({ message: 'Choose a cargo type from the list' }) }),
   cargoWeight: z.number().positive('Cargo weight must be greater than 0 tonnes'),
   cargoDimensions: z.string().optional(),
   requiredVehicleType: vehicleTypeEnum,
@@ -36,13 +36,19 @@ const createShipmentSchema = z.object({
 
 const acceptBidSchema = z.object({
   bidId: z.string().uuid('Valid Bid UUID required'),
+  expectedFare: z.number().positive('The fare you saw (expectedFare) is required'),
 });
 
 const cancelShipmentSchema = z.object({
   reason: z.string().min(3, 'Cancellation reason is required'),
 });
 
+const noShowSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
 module.exports = {
+  noShowSchema,
   previewRouteSchema,
   createShipmentSchema,
   acceptBidSchema,

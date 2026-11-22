@@ -1,25 +1,65 @@
 const prisma = require('../config/db');
-const { calculateHaversineDistance } = require('../services/osrm.service');
+const { estimateRoadRoute } = require('../services/osrm.service');
 const { LIMITS, SHIPMENT_STATUS, ROLES } = require('../config/constants');
+const { dispatchNotification } = require('../services/fcm.service');
 const logger = require('../utils/logger');
 
 // Trip rooms map: tripId -> Set of ws clients
 const tripRooms = new Map();
 
+const MAX_REPORT_AGE_MS = 10 * 60 * 1000; // a live report older than this belongs to the offline sync (CI-5)
+const MAX_FUTURE_SKEW_MS = 60 * 1000;
+
+/**
+ * Validates a live position report. Accuracy is required and must be positive, so a
+ * missing or zero accuracy cannot slip past the 100 m filter (C-29, HI-3).
+ */
+function validateLocation(payload, now = new Date()) {
+  const { latitude, longitude, accuracy, timestamp } = payload;
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  if (!isNum(latitude) || latitude < -90 || latitude > 90) return { ok: false, reason: 'Invalid latitude' };
+  if (!isNum(longitude) || longitude < -180 || longitude > 180) return { ok: false, reason: 'Invalid longitude' };
+  if (!isNum(accuracy) || accuracy <= 0) return { ok: false, reason: 'Accuracy is required and must be positive' };
+  let recordedAt = now;
+  if (timestamp !== undefined && timestamp !== null) {
+    const parsed = new Date(timestamp);
+    if (typeof timestamp !== 'string' && typeof timestamp !== 'number') return { ok: false, reason: 'Invalid timestamp' };
+    if (Number.isNaN(parsed.getTime())) return { ok: false, reason: 'Invalid timestamp' };
+    if (parsed.getTime() > now.getTime() + MAX_FUTURE_SKEW_MS) return { ok: false, reason: 'Timestamp is in the future' };
+    if (parsed.getTime() < now.getTime() - MAX_REPORT_AGE_MS) return { ok: false, reason: 'Timestamp is too old for a live report' };
+    recordedAt = parsed.getTime() > now.getTime() ? now : parsed;
+  }
+  return { ok: true, value: { latitude, longitude, accuracy, recordedAt } };
+}
+
+function leaveRoom(ws, tripId) {
+  const room = tripRooms.get(tripId);
+  if (room) {
+    room.delete(ws);
+    if (room.size === 0) tripRooms.delete(tripId);
+  }
+  if (ws.tripIds) ws.tripIds.delete(tripId);
+}
+
 /**
  * Handles incoming WebSocket messages for live GPS tracking
- * Requirement: FR-RT-1, FR-RT-2, FR-RT-10, HI-3, Table 3.20
+ * Requirement: FR-RT-1, FR-RT-1, FR-RT-7, HI-3, Table 3.20
  */
 async function handleTrackingMessage(ws, messageData, user) {
   try {
     const payload = JSON.parse(messageData);
-    const { action, tripId, latitude, longitude, accuracy, timestamp } = payload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+    const { action, tripId } = payload;
+    if (tripId !== undefined && (typeof tripId !== 'string' || tripId.length > 64)) {
+      ws.send(JSON.stringify({ event: 'ERROR', message: 'Invalid tripId' }));
+      return;
+    }
 
     switch (action) {
       case 'JOIN_TRIP': {
         if (!tripId) return;
 
-        // Verify authorization to subscribe to this trip (FR-RT-10)
+        // Verify authorization to subscribe to this trip (FR-RT-7)
         const trip = await prisma.trip.findUnique({
           where: { id: tripId },
           include: { shipment: true },
@@ -44,7 +84,13 @@ async function handleTrackingMessage(ws, messageData, user) {
           tripRooms.set(tripId, new Set());
         }
         tripRooms.get(tripId).add(ws);
-        ws.tripId = tripId;
+        if (!ws.tripIds) ws.tripIds = new Set();
+        if (!ws.tripIds.has(tripId) && ws.tripIds.size >= 20) {
+          leaveRoom(ws, tripId);
+          ws.send(JSON.stringify({ event: 'ERROR', message: 'Too many trip subscriptions' }));
+          return;
+        }
+        ws.tripIds.add(tripId);
 
         ws.send(JSON.stringify({ event: 'JOINED_TRIP', tripId }));
         logger.info(`[WS] User ${user.id} (${user.role}) joined trip room ${tripId}`);
@@ -52,10 +98,8 @@ async function handleTrackingMessage(ws, messageData, user) {
       }
 
       case 'LEAVE_TRIP': {
-        if (ws.tripId && tripRooms.has(ws.tripId)) {
-          tripRooms.get(ws.tripId).delete(ws);
-        }
-        ws.tripId = null;
+        if (tripId) leaveRoom(ws, tripId);
+        else for (const id of [...(ws.tripIds || [])]) leaveRoom(ws, id);
         ws.send(JSON.stringify({ event: 'LEFT_TRIP' }));
         break;
       }
@@ -66,12 +110,17 @@ async function handleTrackingMessage(ws, messageData, user) {
           return;
         }
 
-        if (!tripId || latitude === undefined || longitude === undefined) {
+        if (!tripId) return;
+
+        const check = validateLocation(payload);
+        if (!check.ok) {
+          ws.send(JSON.stringify({ event: 'ERROR', message: check.reason }));
           return;
         }
+        const { latitude, longitude, accuracy, recordedAt } = check.value;
 
         // 1. Accuracy filter (HI-3: Discard if accuracy > 100 meters)
-        if (accuracy && accuracy > LIMITS.MAX_GPS_ACCURACY_METERS) {
+        if (accuracy > LIMITS.MAX_GPS_ACCURACY_METERS) {
           logger.warn(`[WS] Discarded low-accuracy position report: ${accuracy}m > 100m (HI-3)`);
           return;
         }
@@ -98,16 +147,15 @@ async function handleTrackingMessage(ws, messageData, user) {
         }
 
         const now = new Date();
-        const recordedAt = timestamp ? new Date(timestamp) : now;
 
-        // 3. Save position in database (FR-RT-3)
+        // 3. Save position in database (FR-RT-1)
         const position = await prisma.tripPosition.create({
           data: {
             tripId,
             driverId: user.id,
             latitude,
             longitude,
-            accuracy: accuracy || 0,
+            accuracy,
             recordedAt,
           },
         });
@@ -122,15 +170,26 @@ async function handleTrackingMessage(ws, messageData, user) {
           },
         });
 
-        // 5. Recompute remaining distance and ETA (FR-RT-9)
-        const remaining = calculateHaversineDistance(
+        // Tell the cargo owner when tracking comes back after an interruption (FR-NC-7, Table 3.20)
+        if (trip.isInterrupted) {
+          await dispatchNotification({
+            recipientId: trip.shipment.cargoOwnerId,
+            type: 'TRACKING_UNAVAILABLE_OR_RESUMED',
+            title: 'Live Tracking Resumed',
+            message: `Live GPS tracking for shipment ${trip.shipment.shipmentNumber} has resumed.`,
+            relatedShipmentId: trip.shipmentId,
+          });
+        }
+
+        // 5. Recompute remaining distance and ETA (FR-RT-6)
+        const remaining = estimateRoadRoute(
           latitude,
           longitude,
           trip.shipment.dropoffLat,
           trip.shipment.dropoffLng
         );
 
-        // 6. Broadcast position to all subscribers in trip room (FR-RT-10, CI-2)
+        // 6. Broadcast position to all subscribers in trip room (FR-RT-7, CI-2)
         const broadcastPayload = JSON.stringify({
           event: 'POSITION_UPDATE',
           tripId,
@@ -165,15 +224,11 @@ async function handleTrackingMessage(ws, messageData, user) {
 }
 
 function handleClientDisconnect(ws) {
-  if (ws.tripId && tripRooms.has(ws.tripId)) {
-    tripRooms.get(ws.tripId).delete(ws);
-    if (tripRooms.get(ws.tripId).size === 0) {
-      tripRooms.delete(ws.tripId);
-    }
-  }
+  for (const id of [...(ws.tripIds || [])]) leaveRoom(ws, id);
 }
 
 module.exports = {
   handleTrackingMessage,
   handleClientDisconnect,
+  validateLocation,
 };

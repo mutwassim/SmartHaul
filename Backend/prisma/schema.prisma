@@ -57,6 +57,26 @@ enum VehicleType {
   DUMPER
 }
 
+enum CargoType {
+  GENERAL_GOODS
+  CONSTRUCTION_MATERIAL
+  AGRICULTURAL_PRODUCE
+  PACKAGED_GOODS
+  FURNITURE
+  BULK_GOODS
+  MACHINERY
+  INDUSTRIAL_RAW_MATERIAL
+  CONTAINERS
+  OVERSIZED_AND_INDUSTRIAL_CARGO
+  CONTAINERISED_GOODS
+  EXPORT_AND_IMPORT_CONSIGNMENTS
+  PERISHABLE_GOODS
+  PHARMACEUTICAL_GOODS
+  TEMPERATURE_CONTROLLED_CARGO
+  LIQUIDS_AND_BULK_FLUID
+  LOOSE_BULK_SAND_GRAVEL_EARTH
+}
+
 enum VehicleAvailability {
   AVAILABLE
   ASSIGNED
@@ -81,6 +101,12 @@ enum BidStatus {
   ACCEPTED
   REJECTED
   WITHDRAWN
+  EXPIRED // Not accepted within 24 hours of being placed
+}
+
+enum PenaltyStatus {
+  ACTIVE
+  WAIVED
 }
 
 enum PaymentStatus {
@@ -126,11 +152,18 @@ enum NotificationType {
   COMPLAINT_STATUS_CHANGED
   ACCOUNT_SUSPENDED_OR_REINSTATED
   PLATFORM_ANNOUNCEMENT
+  NEW_MESSAGE
+  FLEET_INVITATION
+  BID_EXPIRED
+  DRIVER_PENALTY
 }
 
 enum AuthAction {
   LOGIN_SUCCESS
   LOGIN_FAILED
+  REGISTERED
+  PROFILE_UPDATED
+  DOCUMENT_UPLOADED
   LOGOUT
   PASSWORD_RESET_REQUESTED
   PASSWORD_RESET_SUCCESS
@@ -164,9 +197,13 @@ model User {
   avgRating           Float             @default(0.0)
   totalRatings        Int               @default(0)
   completedTripsCount Int               @default(0)
+  cancelledTripsCount Int               @default(0)  // Trips a driver cancelled after booking (C-47)
   
   failedLoginAttempts Int               @default(0)
+  firstFailedAt       DateTime?         // Start of the current 15-minute failed-login window (SEC-5)
   lockoutUntil        DateTime?
+  tokenVersion        Int               @default(0) // Bumped to end every session of this user (SEC-4)
+  statusBeforeSuspension AccountStatus? // Restored when an administrator reinstates the account
   lastLoginAt         DateTime?
   
   createdAt           DateTime          @default(now())
@@ -198,6 +235,7 @@ model User {
   notifications       Notification[]     @relation("UserNotifications")
   deviceTokens        DeviceToken[]
   complaintsRaised    Complaint[]        @relation("ComplaintsRaised")
+  penalties           DriverPenalty[]    @relation("UserPenalties")
   complaintsAgainst   Complaint[]        @relation("ComplaintsAgainst")
   paymentStatusLogs   PaymentStatusLog[] @relation("PaymentStatusChanger")
   tripStatusLogs      TripStatusLog[]    @relation("TripStatusChanger")
@@ -215,12 +253,20 @@ model User {
   @@unique([email, role], name: "unique_email_per_role")
   @@index([role, accountStatus])
   @@index([cnicHash])
+
+  @@unique([cnicHash, role]) // One account per CNIC per role (BR-2)
+}
+
+enum LinkStatus {
+  INVITED
+  ACTIVE
 }
 
 model DriverFleetLink {
   id           String     @id @default(uuid())
   fleetOwnerId String
   driverId     String     @unique
+  status       LinkStatus @default(INVITED) // A driver joins a fleet only after accepting (C-10)
   fleetOwner   User       @relation("FleetOwnerDrivers", fields: [fleetOwnerId], references: [id], onDelete: Cascade)
   driver       User       @relation("DriverFleetLink", fields: [driverId], references: [id], onDelete: Cascade)
   createdAt    DateTime   @default(now())
@@ -293,6 +339,7 @@ model Vehicle {
   updatedAt                  DateTime            @updatedAt
   
   trips                      Trip[]
+  bids                       Bid[]
 
   @@index([ownerId])
   @@index([vehicleType, availabilityStatus])
@@ -316,7 +363,7 @@ model Shipment {
   dropoffContactName   String?
   dropoffContactPhone  String?
   
-  cargoType            String
+  cargoType            CargoType
   cargoWeight          Float            // in metric tonnes
   cargoDimensions      String?          // e.g. "12x4x4 m" or JSON
   requiredVehicleType  VehicleType
@@ -335,6 +382,7 @@ model Shipment {
   cancelledById        String?
   completedAt          DateTime?
   autoCompletedAt      DateTime?        // 72-hour auto-completion timestamp (BR-20)
+  deliveredAt          DateTime?        // When the driver marked it Delivered; starts the 72-hour clock (BR-20)
   
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
@@ -345,6 +393,7 @@ model Shipment {
   proofOfDelivery      ProofOfDelivery?
   paymentRecord        PaymentRecord?
   complaints           Complaint[]
+  driverPenalties      DriverPenalty[]
   messages             ShipmentMessage[]
   ratings              Rating[]
   recommendationLogs   RecommendationLog[]
@@ -361,6 +410,8 @@ model Bid {
   bidderId              String
   bidder                User        @relation("UserBids", fields: [bidderId], references: [id], onDelete: Cascade)
   
+  vehicleId             String?
+  vehicle               Vehicle?    @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   offeredVehicleType    VehicleType
   proposedFare          Float       // PKR
   estimatedDeliveryTime DateTime
@@ -371,6 +422,25 @@ model Bid {
 
   @@index([shipmentId, status])
   @@index([bidderId])
+  @@index([vehicleId])
+}
+
+// A no-show flagged by the cargo owner against the party that won the booking. Three active
+// penalties in one calendar month suspend the account. An admin can waive one on a complaint.
+model DriverPenalty {
+  id          String        @id @default(uuid())
+  userId      String
+  user        User          @relation("UserPenalties", fields: [userId], references: [id], onDelete: Cascade)
+  shipmentId  String
+  shipment    Shipment      @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  flaggedById String
+  reason      String?
+  status      PenaltyStatus @default(ACTIVE)
+  waivedAt    DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@unique([userId, shipmentId])
+  @@index([userId, status, createdAt])
 }
 
 model Trip {
@@ -402,6 +472,7 @@ model Trip {
   
   statusLogs       TripStatusLog[]
   positions        TripPosition[]
+  routeSummary     RouteSummary?
 
   @@index([driverId])
   @@index([vehicleId])
@@ -438,6 +509,32 @@ model TripPosition {
   @@index([createdAt]) // For 90-day retention pruning (BR-17, SEC-14)
 }
 
+// Unhandled server errors, kept for at least 30 days (REL-12)
+model ErrorLog {
+  id         String   @id @default(uuid())
+  occurredAt DateTime @default(now())
+  userRole   String?  // Role of the requesting user, if authenticated
+  operation  String   // e.g. "POST /api/v1/shipments"
+  message    String   @db.Text
+  trace      String?  @db.Text
+
+  @@index([occurredAt])
+}
+
+// Kept after detailed GPS positions are deleted at 90 days (BR-17, FR-RT-5)
+model RouteSummary {
+  id            String   @id @default(uuid())
+  tripId        String   @unique
+  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  shipmentId    String   @unique
+  totalKm       Float
+  loadedKm      Float
+  durationMin   Int
+  positionCount Int
+  path          Json     // Down-sampled [[lat, lng], ...] route
+  summarisedAt  DateTime @default(now())
+}
+
 model ProofOfDelivery {
   id          String   @id @default(uuid())
   shipmentId  String   @unique
@@ -461,6 +558,7 @@ model PaymentRecord {
   cargoOwnerId   String
   driverId       String?
   fleetOwnerId   String?
+  payeeId        String?            // The party being paid: the accepted bidder. Never the employee driver (C-09)
   
   agreedFare     Float              // Locked at bid acceptance. Alterable only by Admin resolving dispute (BR-23, FR-AD-16)
   amountReceived Float              @default(0.0)
@@ -475,6 +573,7 @@ model PaymentRecord {
   @@index([cargoOwnerId])
   @@index([driverId])
   @@index([fleetOwnerId])
+  @@index([payeeId])
   @@index([status])
 }
 
@@ -624,6 +723,14 @@ model AuthLog {
 
   @@index([identifier, timestamp])
   @@index([userId])
+}
+
+model RevokedToken {
+  tokenHash String   @id // SHA-256 of the revoked session token
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 model PasswordResetToken {

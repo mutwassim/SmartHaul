@@ -1,11 +1,11 @@
 const prisma = require('../../config/db');
-const { calculateHaversineDistance } = require('../../services/osrm.service');
+const { estimateRoadRoute } = require('../../services/osrm.service');
 const { successResponse, errorResponse } = require('../../utils/response');
 const { ROLES, SHIPMENT_STATUS } = require('../../config/constants');
 
 /**
  * Get live tracking view for a shipment
- * Requirement: FR-RT-9, FR-RT-10, FR-CO-17
+ * Requirement: FR-RT-6, FR-RT-7, FR-CO-10
  */
 async function getLiveShipmentTracking(req, res, next) {
   try {
@@ -31,14 +31,14 @@ async function getLiveShipmentTracking(req, res, next) {
       return errorResponse(res, 'SHIPMENT_NOT_FOUND', 'Shipment not found', 404);
     }
 
-    // Role-based access control (FR-RT-10, SEC-14)
+    // Role-based access control (FR-RT-7, SEC-14)
     const isOwner = shipment.cargoOwnerId === req.user.id;
     const isDriver = shipment.trip && shipment.trip.driverId === req.user.id;
     const isFleetOwner = shipment.trip && shipment.trip.fleetOwnerId === req.user.id;
     const isAdmin = req.user.role === ROLES.ADMIN;
 
     if (!isOwner && !isDriver && !isFleetOwner && !isAdmin) {
-      return errorResponse(res, 'FORBIDDEN', 'Access denied. You are not authorized to view tracking for this shipment (FR-RT-10).', 403);
+      return errorResponse(res, 'FORBIDDEN', 'Access denied. You are not authorized to view tracking for this shipment (FR-RT-7).', 403);
     }
 
     const latestPosition =
@@ -46,12 +46,12 @@ async function getLiveShipmentTracking(req, res, next) {
         ? shipment.trip.positions[0]
         : null;
 
-    // Calculate remaining distance and ETA if position is available (FR-RT-9)
+    // Calculate remaining distance and ETA if position is available (FR-RT-6)
     let remainingDistanceKm = shipment.distanceKm;
     let estimatedArrivalMinutes = shipment.durationMinutes;
 
     if (latestPosition) {
-      const remaining = calculateHaversineDistance(
+      const remaining = estimateRoadRoute(
         latestPosition.latitude,
         latestPosition.longitude,
         shipment.dropoffLat,
@@ -79,7 +79,7 @@ async function getLiveShipmentTracking(req, res, next) {
         isInterrupted: shipment.trip ? shipment.trip.isInterrupted : false,
         driver: shipment.trip ? shipment.trip.driver : null,
       },
-      'Live tracking retrieved (FR-RT-9)'
+      'Live tracking retrieved (FR-RT-6)'
     );
   } catch (error) {
     next(error);
@@ -88,7 +88,7 @@ async function getLiveShipmentTracking(req, res, next) {
 
 /**
  * Get route history for completed shipment
- * Requirement: FR-RT-13
+ * Requirement: FR-RT-9
  */
 async function getTripRouteHistory(req, res, next) {
   try {
@@ -125,7 +125,7 @@ async function getTripRouteHistory(req, res, next) {
         totalDistanceKm: trip.shipment.distanceKm,
         positions: trip.positions,
       },
-      'Route history retrieved (FR-RT-13)'
+      'Route history retrieved (FR-RT-9)'
     );
   } catch (error) {
     next(error);

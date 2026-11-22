@@ -11,7 +11,12 @@ const envSchema = z.object({
   OSRM_BASE_URL: z.string().url().default('https://router.project-osrm.org'),
   UPLOAD_DIR: z.string().default('./uploads'),
   SIGNED_URL_EXPIRY_SECONDS: z.coerce.number().default(900),
-  ADMIN_BOOTSTRAP_SECRET: z.string().default('smarthaul_admin_provision_secret_2026'),
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0), // Number of reverse-proxy hops in front of the API (0 = none)
+  CORS_ORIGINS: z
+    .string()
+    .default('')
+    .transform((v) => v.split(',').map((o) => o.trim()).filter(Boolean)), // Comma-separated allowed origins; required in production
+  FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(), // Path to the Firebase service-account JSON; push is disabled when unset
 });
 
 const parsed = envSchema.safeParse(process.env);

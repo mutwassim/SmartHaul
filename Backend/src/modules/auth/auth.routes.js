@@ -32,6 +32,12 @@ router.post(
 );
 
 router.post(
+  '/refresh',
+  authenticate,
+  authController.refreshSession
+);
+
+router.post(
   '/password-recovery/request',
   authLimiter,
   validateRequest({ body: passwordRecoveryRequestSchema }),

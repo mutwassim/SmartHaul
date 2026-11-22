@@ -166,3 +166,20 @@ tmp/
 temp/
 *.tmp
 /SmartHaul_SRS_v1.0 (Revised).pdf
+# Firebase service-account credentials
+*firebase*adminsdk*.json
+firebase-service-account*.json
+
+
+# App Folder
+App/
+
+# ------------------------------------------
+# Claude Generated / Audit Folders
+# ------------------------------------------
+Claude outputs/
+/docs/
+scratch/
+srs-evidence/
+Backend/_to_delete/
+Backend/tests/srs/

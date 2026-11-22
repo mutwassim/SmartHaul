@@ -88,7 +88,7 @@ export default function AuditLogsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-          Administrative Audit Log (FR-AD-19, BR-28, SEC-15)
+          Administrative Audit Log (FR-AD-13, BR-28, SEC-15)
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
           Append-only, immutable record of every administrator action affecting verifications, accounts, complaints, and payment dispute settlements

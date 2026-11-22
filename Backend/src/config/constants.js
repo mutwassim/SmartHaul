@@ -39,8 +39,8 @@ module.exports = {
     PENDING: ['BOOKED', 'CANCELLED'],
     BOOKED: ['REACHED_PICKUP', 'CANCELLED'],
     REACHED_PICKUP: ['CARGO_LOADED', 'CANCELLED'],
-    CARGO_LOADED: ['IN_TRANSIT', 'CANCELLED'],
-    IN_TRANSIT: ['REACHED_DESTINATION', 'CANCELLED'],
+    CARGO_LOADED: ['IN_TRANSIT'],
+    IN_TRANSIT: ['REACHED_DESTINATION'],
     REACHED_DESTINATION: ['DELIVERED'],
     DELIVERED: ['COMPLETED'],
     COMPLETED: [],
@@ -53,6 +53,7 @@ module.exports = {
     ACCEPTED: 'ACCEPTED',
     REJECTED: 'REJECTED',
     WITHDRAWN: 'WITHDRAWN',
+    EXPIRED: 'EXPIRED',
   },
 
   // Payment Statuses (Table C-3)
@@ -147,21 +148,52 @@ module.exports = {
 
   TIMING: {
     OSRM_TIMEOUT_MS: 5000, // 5 seconds (SI-2.4)
-    TRACKING_UPDATE_INTERVAL_SEC: 30, // 30s (FR-RT-2)
-    TRACKING_INTERRUPTION_THRESHOLD_SEC: 120, // 120s (FR-RT-11)
-    AUTO_COMPLETION_HOURS: 72, // 72 hours (BR-20, FR-CO-21)
+    TRACKING_UPDATE_INTERVAL_SEC: 30, // 30s (FR-RT-1)
+    TRACKING_INTERRUPTION_THRESHOLD_SEC: 120, // 120s (FR-RT-8)
+    BID_VALIDITY_HOURS: 24, // A bid not accepted within 24 hours expires
+    AUTO_COMPLETION_HOURS: 72, // 72 hours (BR-20, FR-CO-13)
     POSITION_RETENTION_DAYS: 90, // 90 days (BR-17, SEC-14)
+    ERROR_LOG_RETENTION_DAYS: 90, // REL-12 requires at least 30 days
   },
 
   LIMITS: {
     MAX_LIST_PAGE_SIZE: 100, // SI-1.5
     DEFAULT_LIST_PAGE_SIZE: 20,
-    MAX_POD_IMAGES: 5, // BR-18, FR-DR-18
-    MIN_POD_IMAGES: 1, // BR-18, FR-DR-19
-    MAX_COMPLAINT_IMAGES: 3, // FR-CO-25
+    MAX_POD_IMAGES: 5, // BR-18, FR-DR-14
+    MIN_POD_IMAGES: 1, // BR-18, FR-DR-15
+    MAX_COMPLAINT_IMAGES: 3, // FR-CO-16
+    MAX_MESSAGE_LENGTH: 1000, // Chat message cap (C-37)
+    MAX_REVIEW_LENGTH: 1000, // Rating review cap (C-38)
+    MAX_COMPLAINT_DESCRIPTION: 2000, // Complaint and dispute text cap (C-39)
     MAX_FILE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB (SI-4.3, OE-12)
     MAX_GPS_ACCURACY_METERS: 100, // HI-3
     RETURN_LOAD_RADIUS_KM: 50, // Proximity radius for return load detection
+    NO_SHOW_PENALTY_LIMIT: 3, // Active no-show penalties in a calendar month that suspend the account
+    PROXIMITY_MAX_POINTS: 30, // FR-RM-4 proximity term: points at the pickup (the weight in MATCH_WEIGHTS)
+    PROXIMITY_RADIUS_KM: 200, // FR-RM-4 proximity term: distance at which it reaches 0
+    EXPERIENCE_FULL_TRIPS: 20, // Completed trips that earn the full experience points
     SHARED_LOAD_DETOUR_PERCENT_MAX: 15, // Max allowable detour % for shared load
+    RETURN_LOAD_WINDOW_HOURS: 48, // A previous trip only counts for return-load matching and empty-running if it ended this recently (FR-RM-4)
+    NOTIFY_TOP_CANDIDATES: 10, // Eligible candidates notified when a shipment is published (FR-NC-3)
+    AVERAGE_SPEED_KMH: 50, // One speed for every ETA and delivery-window estimate
+    ROAD_FACTOR: 1.3, // Straight-line to road distance for Pakistan
+  },
+
+  // Ranking score, 100 points in total (FR-RM-5, Algorithm 1). No factor is worth more than 30,
+  // so no single factor can decide a ranking alone. An unrated driver earns 0 rating points.
+  // The shared-load term applies only to the experimental shared-load suggestion.
+  MATCH_WEIGHTS: {
+    PROXIMITY: 30,
+    RATING: 25,
+    RETURN_LOAD: 20,
+    VEHICLE_FIT_EXACT: 15,
+    VEHICLE_FIT_COMPATIBLE: 5,
+    EXPERIENCE: 10,
+    SHARED_LOAD: 10,
   },
 };
+
+// Cargo categories are the union of Table C-5 compatible cargo lists; the Prisma CargoType enum must match (tested)
+module.exports.CARGO_TYPES = [
+  ...new Set(Object.values(module.exports.VEHICLE_TYPES).flatMap((v) => v.compatibleCargos)),
+];

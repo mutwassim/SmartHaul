@@ -45,7 +45,7 @@ export default function AnalyticsPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-            Platform Analytics & Reporting (MOD-9, FR-AR-1 to FR-AR-14)
+            Platform Analytics & Reporting (MOD-9, FR-AR-1 to FR-AR-5)
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
             Verification throughput, corridor demand distribution, and empty running reduction metrics
@@ -58,7 +58,7 @@ export default function AnalyticsPage() {
           onClick={handleExportCSV}
         >
           <Download size={16} />
-          <span>Export CSV Report (FR-AR-13)</span>
+          <span>Export CSV Report (FR-AR-5)</span>
         </button>
       </div>
 
@@ -87,10 +87,10 @@ export default function AnalyticsPage() {
         />
       </div>
 
-      {/* Top Corridors Demand Ranking (FR-AR-6) */}
+      {/* Top Corridors Demand Ranking (FR-AR-3) */}
       <div className="glass-card" style={{ padding: '24px' }}>
         <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '16px' }}>
-          Top Freight Corridors Demand Ranking (FR-AR-6)
+          Top Freight Corridors Demand Ranking (FR-AR-3)
         </h3>
 
         {routeDemand.length === 0 ? (

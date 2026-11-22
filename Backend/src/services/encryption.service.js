@@ -40,14 +40,18 @@ function decrypt(encryptedData, ivHex, authTagHex) {
   return decrypted;
 }
 
+// Separate key for lookup hashes, derived from the AES key so no extra secret is needed
+const HASH_KEY = crypto.createHmac('sha256', KEY).update('smarthaul:identifier-hash:v1').digest();
+
 /**
- * Creates deterministic SHA-256 hash for exact-match indexing and uniqueness validation
+ * Creates a deterministic keyed hash (HMAC-SHA256) for exact-match lookups and uniqueness checks.
+ * A plain SHA-256 of a CNIC could be reversed by trying all numbers; the key prevents that (SEC-7).
  * Requirement: BR-2, BR-30
  */
 function hashDeterministic(value) {
   if (!value) return null;
   const normalized = value.toString().trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+  return crypto.createHmac('sha256', HASH_KEY).update(normalized).digest('hex');
 }
 
 module.exports = {

@@ -3,7 +3,7 @@ const { ACCOUNT_STATUS, ROLES } = require('../config/constants');
 
 /**
  * Verification & Status Gate Middleware
- * Requirement: BR-3, BR-13, FR-DR-3, FR-FO-1, FR-SV-9, FR-SV-10
+ * Requirement: BR-3, BR-13, FR-DR-1, FR-FO-1, FR-SV-7, FR-SV-7
  */
 function requireVerifiedAccount(req, res, next) {
   if (!req.user) {
@@ -51,6 +51,22 @@ function requireVerifiedAccount(req, res, next) {
   next();
 }
 
+/**
+ * Blocks suspended accounts from operational routes (FR-SV-7)
+ */
+function blockSuspended(req, res, next) {
+  if (req.user && req.user.accountStatus === ACCOUNT_STATUS.SUSPENDED) {
+    return errorResponse(
+      res,
+      'ACCOUNT_SUSPENDED',
+      'Your account has been suspended by an administrator. Active operational actions are blocked.',
+      403
+    );
+  }
+  next();
+}
+
 module.exports = {
   requireVerifiedAccount,
+  blockSuspended,
 };

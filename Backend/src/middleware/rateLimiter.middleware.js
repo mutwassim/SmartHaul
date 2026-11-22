@@ -28,6 +28,7 @@ const apiLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: SECURITY.FAILED_ATTEMPTS_WINDOW_MS,
   max: 10, // 10 attempts total per IP to mitigate distributed attacks
+  skipSuccessfulRequests: true, // SEC-5 concerns failed attempts only
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {

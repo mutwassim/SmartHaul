@@ -1,10 +1,11 @@
 const prisma = require('../../config/db');
 const { successResponse, errorResponse } = require('../../utils/response');
 const { ROLES, SHIPMENT_STATUS, ACCOUNT_STATUS } = require('../../config/constants');
+const { computeEmptyRunning, EMPTY_RUNNING_BASIS } = require('../../services/emptyRunning.service');
 
 /**
  * Platform headline statistics
- * Requirement: FR-AR-2, FR-AD-17, BR-34
+ * Requirement: FR-AR-1, FR-AD-12, BR-34
  */
 async function getPlatformSummary(req, res, next) {
   try {
@@ -48,7 +49,7 @@ async function getPlatformSummary(req, res, next) {
           open: openComplaints,
         },
       },
-      'Platform summary statistics retrieved (FR-AR-2)'
+      'Platform summary statistics retrieved (FR-AR-1)'
     );
   } catch (error) {
     next(error);
@@ -57,7 +58,7 @@ async function getPlatformSummary(req, res, next) {
 
 /**
  * Verification throughput report
- * Requirement: FR-AR-3
+ * Requirement: FR-AR-1
  */
 async function getVerificationThroughput(req, res, next) {
   try {
@@ -75,7 +76,7 @@ async function getVerificationThroughput(req, res, next) {
         rejected,
         total: pending + approved + rejected,
       },
-      'Verification throughput report retrieved (FR-AR-3)'
+      'Verification throughput report retrieved (FR-AR-1)'
     );
   } catch (error) {
     next(error);
@@ -84,7 +85,7 @@ async function getVerificationThroughput(req, res, next) {
 
 /**
  * Route demand analysis (Corridors)
- * Requirement: FR-AR-6
+ * Requirement: FR-AR-3
  */
 async function getRouteDemand(req, res, next) {
   try {
@@ -109,7 +110,7 @@ async function getRouteDemand(req, res, next) {
       .map(([corridor, count]) => ({ corridor, shipmentCount: count }))
       .sort((a, b) => b.shipmentCount - a.shipmentCount);
 
-    return successResponse(res, formattedRoutes, 'Route demand statistics retrieved (FR-AR-6)');
+    return successResponse(res, formattedRoutes, 'Route demand statistics retrieved (FR-AR-3)');
   } catch (error) {
     next(error);
   }
@@ -117,35 +118,33 @@ async function getRouteDemand(req, res, next) {
 
 /**
  * Empty running & vehicle utilisation report
- * Requirement: FR-AR-7
+ * Requirement: FR-AR-6
  */
 async function getEmptyRunningReport(req, res, next) {
   try {
+    // Admins see the whole platform; a fleet owner sees only their own vehicles
     const trips = await prisma.trip.findMany({
-      where: { shipment: { status: SHIPMENT_STATUS.COMPLETED } },
+      where: {
+        shipment: { status: SHIPMENT_STATUS.COMPLETED },
+        ...(req.user.role === ROLES.FLEET_OWNER ? { vehicle: { ownerId: req.user.id } } : {}),
+      },
       include: { shipment: true },
     });
 
-    let totalLoadedKm = 0;
-    trips.forEach((t) => {
-      totalLoadedKm += t.shipment.distanceKm || 0;
-    });
-
-    // Total estimated running distance including return runs
-    const estimatedTotalKm = Math.round(totalLoadedKm * 1.3);
-    const estimatedEmptyKm = estimatedTotalKm - Math.round(totalLoadedKm);
-    const emptyRunningPercentage = estimatedTotalKm > 0 ? Math.round((estimatedEmptyKm / estimatedTotalKm) * 100) : 0;
+    const result = computeEmptyRunning(trips);
 
     return successResponse(
       res,
       {
-        totalCompletedTrips: trips.length,
-        totalLoadedDistanceKm: Math.round(totalLoadedKm),
-        estimatedTotalDistanceKm: estimatedTotalKm,
-        estimatedEmptyDistanceKm: estimatedEmptyKm,
-        emptyRunningPercentage,
+        totalCompletedTrips: result.tripCount,
+        totalLoadedDistanceKm: result.loadedDistanceKm,
+        estimatedTotalDistanceKm: result.totalDistanceKm,
+        estimatedEmptyDistanceKm: result.emptyDistanceKm,
+        emptyRunningPercentage: result.emptyRunningPercentage,
+        measuredLegs: result.measuredLegs,
+        basis: EMPTY_RUNNING_BASIS,
       },
-      'Vehicle utilisation & empty running report retrieved (FR-AR-7)'
+      'Vehicle utilisation & empty running report retrieved (FR-AR-6)'
     );
   } catch (error) {
     next(error);
@@ -154,8 +153,17 @@ async function getEmptyRunningReport(req, res, next) {
 
 /**
  * Export data to CSV format
- * Requirement: FR-AR-13, FR-AD-18
+ * Requirement: FR-AR-5, FR-AR-5
  */
+// Quote a CSV cell, double embedded quotes and neutralise spreadsheet formulas (CSV injection)
+function csvCell(value) {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 async function exportReport(req, res, next) {
   try {
     const { reportType } = req.query;
@@ -181,13 +189,25 @@ async function exportReport(req, res, next) {
       const rows = shipments
         .map(
           (s) =>
-            `"${s.shipmentNumber}","${s.status}","${s.cargoType}",${s.cargoWeight},"${s.requiredVehicleType}",${s.distanceKm},"${s.pickupAddress}","${s.dropoffAddress}","${s.createdAt.toISOString()}"`
+            [
+              s.shipmentNumber,
+              s.status,
+              s.cargoType,
+              s.cargoWeight,
+              s.requiredVehicleType,
+              s.distanceKm,
+              s.pickupAddress,
+              s.dropoffAddress,
+              s.createdAt.toISOString(),
+            ]
+              .map(csvCell)
+              .join(',')
         )
         .join('\n');
 
-      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="shipments_report.csv"');
-      return res.status(200).send(header + rows);
+      return res.status(200).send('\uFEFF' + header + rows);
     }
 
     return errorResponse(res, 'INVALID_REPORT_TYPE', 'Supported report types for export: shipments', 400);

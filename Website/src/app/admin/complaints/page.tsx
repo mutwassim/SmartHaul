@@ -45,7 +45,7 @@ export default function ComplaintsPage() {
 
   const handleResolve = async (decision: 'RESOLVED' | 'REJECTED') => {
     if (!adminRemarks.trim()) {
-      setErrorMessage('Written remarks are mandatory for complaint decision (FR-AD-15).');
+      setErrorMessage('Written remarks are mandatory for complaint decision (FR-AD-10).');
       return;
     }
 
@@ -140,7 +140,7 @@ export default function ComplaintsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-          Dispute & Complaint Resolution (FR-AD-13, FR-AD-16)
+          Dispute & Complaint Resolution (FR-AD-9, FR-AD-11)
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
           Examine submitted evidence, unfreeze disputed payment records, adjust fares, and record immutable decisions (BR-23, BR-28)
@@ -156,7 +156,7 @@ export default function ComplaintsPage() {
         emptyMessage="No complaints or payment disputes registered."
       />
 
-      {/* Arbitration Modal (FR-AD-14, FR-AD-15, FR-AD-16) */}
+      {/* Arbitration Modal (FR-AD-10, FR-AD-10, FR-AD-11) */}
       <Modal
         isOpen={isResolveModalOpen}
         onClose={() => setIsResolveModalOpen(false)}
@@ -199,7 +199,7 @@ export default function ComplaintsPage() {
               </div>
             </div>
 
-            {/* If Payment Dispute, Show Fare Adjustment Control (FR-AD-16, BR-23) */}
+            {/* If Payment Dispute, Show Fare Adjustment Control (FR-AD-11, BR-23) */}
             {selectedComplaint.category === 'PAYMENT_DISPUTE' && (
               <div
                 style={{
@@ -210,7 +210,7 @@ export default function ComplaintsPage() {
                 }}
               >
                 <h4 style={{ fontSize: '0.85rem', color: 'var(--accent-amber)', marginBottom: '8px' }}>
-                  Payment Dispute Resolution & Fare Amendment (FR-AD-16)
+                  Payment Dispute Resolution & Fare Amendment (FR-AD-11)
                 </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
@@ -249,10 +249,10 @@ export default function ComplaintsPage() {
               </div>
             )}
 
-            {/* Written Remarks (FR-AD-15) */}
+            {/* Written Remarks (FR-AD-10) */}
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                Administrator Resolution Remarks (Visible to both parties, FR-AD-15)
+                Administrator Resolution Remarks (Visible to both parties, FR-AD-10)
               </label>
               <textarea
                 className="form-textarea"

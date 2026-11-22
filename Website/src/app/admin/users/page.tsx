@@ -8,6 +8,10 @@ import { Modal } from '../../../components/ui/Modal';
 import { User } from '../../../types';
 import { UserPlus, ShieldAlert, ShieldCheck, UserCheck, Phone, Mail } from 'lucide-react';
 
+// Reinstatement restores the status held before suspension (FR-AD-5)
+const reinstateStatus = (user: User | null) =>
+  user?.statusBeforeSuspension || (user?.role === 'CARGO_OWNER' ? 'ACTIVE' : 'VERIFIED');
+
 export default function UsersManagementPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,12 +22,16 @@ export default function UsersManagementPage() {
   const [newStatus, setNewStatus] = useState<'SUSPENDED' | 'ACTIVE' | 'VERIFIED'>('SUSPENDED');
   const [statusReason, setStatusReason] = useState('');
 
-  // Provision admin modal state (FR-AD-4)
+  // Provision admin modal state (FR-AD-1)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
   const [adminName, setAdminName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  // Password reset token modal state (FR-SV-4)
+  const [resetUser, setResetUser] = useState<User | null>(null);
+  const [resetReason, setResetReason] = useState('');
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -33,24 +41,8 @@ export default function UsersManagementPage() {
 
   const fetchUsers = async () => {
     try {
-      // In production, GET /users endpoint lists users
-      const data = await api.get<any>('/analytics/platform-summary');
-      // For demo, list users from DB or summary
-      setUsers([
-        {
-          id: 'admin-1',
-          role: 'ADMIN',
-          name: 'System Administrator',
-          phone: '+923001234567',
-          email: 'admin@smarthaul.pk',
-          accountStatus: 'ACTIVE',
-          preferredLanguage: 'EN',
-          avgRating: 5.0,
-          totalRatings: 0,
-          completedTripsCount: 0,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      const data = await api.get<User[]>('/admin/users?limit=100');
+      setUsers(data || []);
     } catch (err) {
       console.error('Error fetching users:', err);
     } finally {
@@ -77,7 +69,7 @@ export default function UsersManagementPage() {
 
     try {
       await api.post(`/admin/users/${selectedUser?.id}/status`, {
-        status: newStatus,
+        status: newStatus === 'SUSPENDED' ? 'SUSPENDED' : reinstateStatus(selectedUser),
         reason: statusReason,
       });
 
@@ -85,6 +77,25 @@ export default function UsersManagementPage() {
       fetchUsers();
     } catch (err: any) {
       setFormError(err.message || 'Failed to update account status');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleIssueResetToken = async () => {
+    if (resetReason.trim().length < 3) {
+      setFormError('Record how the identity of the account owner was checked (FR-SV-4).');
+      return;
+    }
+    setIsProcessing(true);
+    setFormError(null);
+    try {
+      const res = await api.post<{ resetToken: string }>(`/admin/users/${resetUser?.id}/reset-token`, {
+        reason: resetReason,
+      });
+      setResetToken(res.resetToken);
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to issue reset token');
     } finally {
       setIsProcessing(false);
     }
@@ -108,7 +119,7 @@ export default function UsersManagementPage() {
       setAdminEmail('');
       setAdminPhone('');
       setAdminPassword('');
-      alert('Administrator account provisioned successfully (FR-AD-4)');
+      alert('Administrator account provisioned successfully (FR-AD-1)');
     } catch (err: any) {
       setFormError(err.message || 'Failed to provision administrator');
     } finally {
@@ -153,15 +164,30 @@ export default function UsersManagementPage() {
     },
     {
       header: 'Actions',
-      render: (item) => (
-        <button
-          className="btn btn-secondary"
-          style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-          onClick={() => handleOpenStatusModal(item)}
-        >
-          {item.accountStatus === 'SUSPENDED' ? 'Reinstate' : 'Suspend Account'}
-        </button>
-      ),
+      render: (item) =>
+        item.role === 'ADMIN' ? null : (
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+              onClick={() => handleOpenStatusModal(item)}
+            >
+              {item.accountStatus === 'SUSPENDED' ? 'Reinstate' : 'Suspend Account'}
+            </button>
+            <button
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+              onClick={() => {
+                setResetUser(item);
+                setResetReason('');
+                setResetToken(null);
+                setFormError(null);
+              }}
+            >
+              Reset Password
+            </button>
+          </div>
+        ),
     },
   ];
 
@@ -170,7 +196,7 @@ export default function UsersManagementPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-            User Account Management (FR-AD-8, FR-AD-9)
+            User Account Management (FR-SV-11, FR-AD-5)
           </h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
             Manage platform accounts, suspend/reinstate users with recorded reasons, and provision staff
@@ -186,7 +212,7 @@ export default function UsersManagementPage() {
           }}
         >
           <UserPlus size={16} />
-          <span>Provision Administrator (FR-AD-4)</span>
+          <span>Provision Administrator (FR-AD-1)</span>
         </button>
       </div>
 
@@ -198,7 +224,7 @@ export default function UsersManagementPage() {
         isLoading={isLoading}
       />
 
-      {/* Account Status Modal (FR-AD-9) */}
+      {/* Account Status Modal (FR-AD-5) */}
       <Modal
         isOpen={isStatusModalOpen}
         onClose={() => setIsStatusModalOpen(false)}
@@ -215,7 +241,7 @@ export default function UsersManagementPage() {
               value={newStatus}
               onChange={(e) => setNewStatus(e.target.value as any)}
             >
-              <option value="SUSPENDED">Suspended (Block bidding & trips, FR-AD-9)</option>
+              <option value="SUSPENDED">Suspended (Block bidding & trips, FR-AD-5)</option>
               <option value="VERIFIED">Verified / Active (Reinstated)</option>
             </select>
           </div>
@@ -255,11 +281,57 @@ export default function UsersManagementPage() {
         </div>
       </Modal>
 
-      {/* Provision Administrator Modal (FR-AD-4) */}
+      {/* Password reset token (FR-SV-4) */}
+      <Modal
+        isOpen={resetUser !== null}
+        onClose={() => setResetUser(null)}
+        title={`Reset Password: ${resetUser?.name || ''}`}
+        maxWidth="500px"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {resetToken ? (
+            <>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Give this single-use token to the account owner. It expires in 15 minutes and is not shown again.
+              </p>
+              <code style={{ padding: '12px', wordBreak: 'break-all', backgroundColor: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
+                {resetToken}
+              </code>
+            </>
+          ) : (
+            <>
+              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                How was the identity of the account owner checked? (recorded in the audit log)
+              </label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                value={resetReason}
+                onChange={(e) => setResetReason(e.target.value)}
+              />
+              {formError && (
+                <div style={{ padding: '10px', backgroundColor: 'var(--accent-rose-bg)', color: 'var(--accent-rose)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem' }}>
+                  {formError}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setResetUser(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" disabled={isProcessing} onClick={handleIssueResetToken}>
+                  Issue Token
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Provision Administrator Modal (FR-AD-1) */}
       <Modal
         isOpen={isProvisionModalOpen}
         onClose={() => setIsProvisionModalOpen(false)}
-        title="Provision Administrator Account (FR-AD-4)"
+        title="Provision Administrator Account (FR-AD-1)"
         maxWidth="520px"
       >
         <form onSubmit={handleProvisionAdmin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

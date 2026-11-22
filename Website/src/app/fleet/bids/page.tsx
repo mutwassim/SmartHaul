@@ -5,7 +5,7 @@ import { api } from '../../../services/api';
 import { DataTable, Column } from '../../../components/ui/DataTable';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import { Modal } from '../../../components/ui/Modal';
-import { Shipment, Vehicle, VehicleType } from '../../../types';
+import { Shipment, Vehicle } from '../../../types';
 import { TrendingUp, DollarSign, Clock, MapPin, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function FleetBidsPage() {
@@ -18,7 +18,7 @@ export default function FleetBidsPage() {
   const [isBidModalOpen, setIsBidModalOpen] = useState(false);
   const [proposedFare, setProposedFare] = useState<number | ''>('');
   const [estimatedDeliveryTime, setEstimatedDeliveryTime] = useState('');
-  const [offeredVehicleType, setOfferedVehicleType] = useState<VehicleType>('OPEN_BODY');
+  const [vehicleId, setVehicleId] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -35,7 +35,7 @@ export default function FleetBidsPage() {
       setVehicles(vData || []);
       setShipments(sData || []);
       if (vData && vData.length > 0) {
-        setOfferedVehicleType(vData[0].vehicleType);
+        setVehicleId(vData[0].id);
       }
     } catch (err) {
       console.error('Error fetching matched loads:', err);
@@ -47,7 +47,14 @@ export default function FleetBidsPage() {
   const handleOpenBidModal = (shipment: Shipment) => {
     setSelectedShipment(shipment);
     setProposedFare('');
-    setOfferedVehicleType(shipment.requiredVehicleType);
+    // Pre-select an available vehicle that can carry this shipment (BR-4, BR-5, BR-12)
+    const fit = vehicles.find(
+      (v) =>
+        v.availabilityStatus === 'AVAILABLE' &&
+        v.vehicleType === shipment.requiredVehicleType &&
+        v.ratedCapacity >= shipment.cargoWeight
+    );
+    setVehicleId(fit?.id ?? vehicles[0]?.id ?? '');
     setEstimatedDeliveryTime(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16));
     setFormError(null);
     setIsBidModalOpen(true);
@@ -68,11 +75,11 @@ export default function FleetBidsPage() {
         shipmentId: selectedShipment?.id,
         proposedFare: Number(proposedFare),
         estimatedDeliveryTime: new Date(estimatedDeliveryTime).toISOString(),
-        offeredVehicleType,
+        vehicleId,
       });
 
       setIsBidModalOpen(false);
-      alert('Fleet bid submitted successfully (FR-FO-12)');
+      alert('Fleet bid submitted successfully (FR-FO-10)');
       fetchData();
     } catch (err: any) {
       setFormError(err.message || 'Failed to submit bid');
@@ -156,7 +163,7 @@ export default function FleetBidsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-          Matched Shipment Loads (FR-FO-11, FR-FO-12)
+          Matched Shipment Loads (FR-FO-9, FR-FO-10)
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
           Open shipment requests matched against your fleet vehicles capacity and body types
@@ -172,7 +179,7 @@ export default function FleetBidsPage() {
         emptyMessage="No open matching shipments currently found."
       />
 
-      {/* Submit Fleet Bid Modal (FR-FO-12) */}
+      {/* Submit Fleet Bid Modal (FR-FO-10) */}
       <Modal
         isOpen={isBidModalOpen}
         onClose={() => setIsBidModalOpen(false)}
@@ -215,16 +222,16 @@ export default function FleetBidsPage() {
 
           <div>
             <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-              Offered Vehicle Class
+              Offered Vehicle
             </label>
             <select
               className="form-select"
-              value={offeredVehicleType}
-              onChange={(e) => setOfferedVehicleType(e.target.value as VehicleType)}
+              value={vehicleId}
+              onChange={(e) => setVehicleId(e.target.value)}
             >
               {vehicles.map((v) => (
-                <option key={v.id} value={v.vehicleType}>
-                  {v.model} ({v.vehicleType.replace(/_/g, ' ')}, {v.ratedCapacity}t)
+                <option key={v.id} value={v.id}>
+                  {v.registrationNumber} - {v.model} ({v.vehicleType.replace(/_/g, ' ')}, {v.ratedCapacity}t)
                 </option>
               ))}
             </select>

@@ -3,7 +3,8 @@ const { runAutoCompleteShipments } = require('./autoCompleteShipments.job');
 const { runDocumentExpiryCheck } = require('./documentExpiry.job');
 const { runTrackingRetentionCleanup } = require('./trackingRetention.job');
 const { runTrackingInterruptionCheck } = require('./trackingInterruption.job');
-const { runNotificationRetryJob } = require('./notificationRetry.job');
+const { runErrorLogRetention } = require('./errorLogRetention.job');
+const { runBidExpiry } = require('./bidExpiry.job');
 const logger = require('../utils/logger');
 
 function initScheduledJobs() {
@@ -29,12 +30,17 @@ function initScheduledJobs() {
     runTrackingInterruptionCheck();
   });
 
-  // 5. In-App Notification Fallback Worker - Runs every 5 minutes
-  cron.schedule('*/5 * * * *', () => {
-    runNotificationRetryJob();
+  // 5. Error Log Retention - Runs every day at 03:30
+  cron.schedule('30 3 * * *', () => {
+    runErrorLogRetention();
   });
 
-  logger.info('✅ All 5 background scheduled jobs active');
+  // 6. Bid Expiry (24 hours) - Runs every hour at :15
+  cron.schedule('15 * * * *', () => {
+    runBidExpiry();
+  });
+
+  logger.info('✅ All 6 background scheduled jobs active');
 }
 
 module.exports = {

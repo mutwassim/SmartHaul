@@ -48,6 +48,9 @@ router.post(
 
 router.delete('/drivers/:id', requireVerifiedAccount, fleetController.unlinkDriver);
 
+// Won bookings waiting for a driver and vehicle (FR-FO-11)
+router.get('/bookings', fleetController.listBookedShipments);
+
 // Post-award resource assignment
 router.post(
   '/assign',

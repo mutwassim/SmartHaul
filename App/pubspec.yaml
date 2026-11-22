@@ -38,8 +38,20 @@ dependencies:
   
   # State Management & Fonts
   google_fonts: ^6.2.1
+
+  # Firebase push notifications
+  firebase_core: ^3.12.1
+  firebase_messaging: ^15.2.4
   provider: ^6.1.2
   intl: ^0.19.0
+
+  # Backend connection, session, live location and proof-of-delivery photos
+  http: ^1.2.2
+  http_parser: ^4.0.2
+  shared_preferences: ^2.3.4
+  web_socket_channel: ^3.0.1
+  geolocator: ^13.0.2
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

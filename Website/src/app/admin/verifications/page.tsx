@@ -65,7 +65,7 @@ export default function VerificationsPage() {
 
   const handleDecision = async (decision: 'APPROVED' | 'REJECTED') => {
     if (decision === 'REJECTED' && !rejectionReason.trim()) {
-      setActionError('A recorded rejection reason is mandatory (FR-AD-7).');
+      setActionError('A recorded rejection reason is mandatory (FR-AD-4).');
       return;
     }
 
@@ -148,7 +148,7 @@ export default function VerificationsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div>
         <h1 style={{ fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em' }}>
-          Verification Queue (FR-AD-5, UC-13)
+          Verification Queue (FR-AD-2, UC-13)
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '4px' }}>
           Review submitted CNIC, driving license, and vehicle documents before granting bidding permissions (BR-3)
@@ -164,7 +164,7 @@ export default function VerificationsPage() {
         emptyMessage="No pending verification requests in the queue."
       />
 
-      {/* Verification Review Modal (FR-AD-6, UI-23) */}
+      {/* Verification Review Modal (FR-AD-3, UI-23) */}
       <Modal
         isOpen={isReviewModalOpen}
         onClose={() => setIsReviewModalOpen(false)}
@@ -270,7 +270,7 @@ export default function VerificationsPage() {
             {/* Rejection Remarks Form */}
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                Rejection Reason (Mandatory if rejecting, FR-AD-7)
+                Rejection Reason (Mandatory if rejecting, FR-AD-4)
               </label>
               <textarea
                 className="form-textarea"

@@ -5,6 +5,9 @@ const compression = require('compression');
 const morgan = require('morgan');
 const { apiLimiter } = require('./middleware/rateLimiter.middleware');
 const { errorHandler } = require('./middleware/error.middleware');
+const env = require('./config/env');
+const prisma = require('./config/db');
+const { errorResponse } = require('./utils/response');
 
 // Import Module Routers
 const authRoutes = require('./modules/auth/auth.routes');
@@ -24,13 +27,25 @@ const storageRoutes = require('./modules/storage/storage.routes');
 
 const app = express();
 
+// Trust the hosting proxy so rate limits are per client, not per proxy (SI-1.6)
+if (env.TRUST_PROXY > 0) {
+  app.set('trust proxy', env.TRUST_PROXY);
+}
+
 // Security & Performance Middlewares (CI-1, CI-6)
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false,
+    hsts: env.NODE_ENV === 'production',
+  })
+);
 app.use(
   cors({
-    origin: '*', // Allow all client origins in dev/testing
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    // Production: only listed origins. Development: reflect the request origin.
+    origin: env.CORS_ORIGINS.length > 0 ? env.CORS_ORIGINS : env.NODE_ENV !== 'production',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 app.use(compression());
@@ -42,9 +57,15 @@ app.use(morgan('combined'));
 app.use('/api/', apiLimiter);
 
 // Health Check
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (error) {
+    return res.status(503).json({ status: 'unhealthy', database: 'down', timestamp: new Date().toISOString() });
+  }
   res.status(200).json({
     status: 'healthy',
+    database: 'up',
     timestamp: new Date().toISOString(),
     service: 'SmartHaul API Backend',
     version: '1.0.0',
@@ -68,6 +89,9 @@ app.use(`${API_PREFIX}/notifications`, notificationRoutes);
 app.use(`${API_PREFIX}/tracking`, trackingRoutes);
 app.use(`${API_PREFIX}/analytics`, analyticsRoutes);
 app.use(`${API_PREFIX}/storage`, storageRoutes);
+
+// Unknown routes
+app.use((req, res) => errorResponse(res, 'NOT_FOUND', 'Route not found', 404));
 
 // Centralized Error Handling Middleware (SI-1.3, REL-10, SEC-16)
 app.use(errorHandler);
