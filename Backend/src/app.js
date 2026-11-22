@@ -56,8 +56,8 @@ app.use(morgan('combined'));
 // Rate Limiting (SI-1.6)
 app.use('/api/', apiLimiter);
 
-// Health Check
-app.get('/health', async (req, res) => {
+// Health Check (also at /api/health, the only path the public proxy forwards)
+app.get(['/health', '/api/health'], async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
   } catch (error) {

@@ -58,6 +58,12 @@ describe('SmartHaul Core E2E & Business Rule Integration Tests', () => {
     await prisma.$disconnect();
   });
 
+  test('GET /api/health returns the same healthy response (public proxy path)', async () => {
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('healthy');
+  });
+
   test('GET /health should return 200 OK with service info', async () => {
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
