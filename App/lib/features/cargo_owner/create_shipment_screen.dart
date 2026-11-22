@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
 import '../../common/widgets/error_banner.dart';
@@ -32,6 +33,10 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   String? _cargo;
   DateTime? _deliveryDate;
 
+  /// Pickup taken from the phone's position instead of the city's centre (FR-CO-2).
+  double? _gpsLat;
+  double? _gpsLng;
+
   @override
   void initState() {
     super.initState();
@@ -49,8 +54,8 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
 
   NewShipment _build() => NewShipment(
         pickupAddress: '${_pickupHub.text.trim()}, ${_pickupCity.name}',
-        pickupLat: _pickupCity.lat,
-        pickupLng: _pickupCity.lng,
+        pickupLat: _gpsLat ?? _pickupCity.lat,
+        pickupLng: _gpsLng ?? _pickupCity.lng,
         dropoffAddress: '${_dropoffHub.text.trim()}, ${_dropoffCity.name}',
         dropoffLat: _dropoffCity.lat,
         dropoffLng: _dropoffCity.lng,
@@ -61,11 +66,37 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
       );
 
   Future<void> _preview() => context.read<CargoProvider>().previewRoute(
-        pickupLat: _pickupCity.lat,
-        pickupLng: _pickupCity.lng,
+        pickupLat: _gpsLat ?? _pickupCity.lat,
+        pickupLng: _gpsLng ?? _pickupCity.lng,
         dropoffLat: _dropoffCity.lat,
         dropoffLng: _dropoffCity.lng,
       );
+
+  Future<void> _useCurrentLocation() async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final cargo = context.read<CargoProvider>();
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
+      if (!await Geolocator.isLocationServiceEnabled() ||
+          permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        messenger.showSnackBar(SnackBar(content: Text(l10n.translate('locationUnavailable'))));
+        return;
+      }
+      final position = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+      if (!mounted) return;
+      setState(() {
+        _gpsLat = position.latitude;
+        _gpsLng = position.longitude;
+      });
+      cargo.clearRoutePreview();
+      messenger.showSnackBar(SnackBar(content: Text(l10n.translate('locationFilled'))));
+    } catch (_) {
+      messenger.showSnackBar(SnackBar(content: Text(l10n.translate('locationUnavailable'))));
+    }
+  }
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
@@ -107,8 +138,20 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
           child: ListView(
             padding: AppShapes.screenPadding,
             children: [
-              _cityPicker(l10n.translate('pickupCity'), _pickupCity, (c) => setState(() => _pickupCity = c)),
+              _cityPicker(l10n.translate('pickupCity'), _pickupCity, (c) => setState(() {
+                    _pickupCity = c;
+                    _gpsLat = null;
+                    _gpsLng = null;
+                  })),
               _text(_pickupHub, l10n.translate('pickupAddress')),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: OutlinedButton.icon(
+                  icon: Icon(_gpsLat == null ? Icons.my_location : Icons.check_circle),
+                  label: Text(l10n.translate(_gpsLat == null ? 'useMyLocation' : 'locationFilled')),
+                  onPressed: _useCurrentLocation,
+                ),
+              ),
               _cityPicker(l10n.translate('dropoffCity'), _dropoffCity, (c) => setState(() => _dropoffCity = c)),
               _text(_dropoffHub, l10n.translate('dropoffAddress')),
               DropdownButtonFormField<VehicleSpec>(

@@ -69,6 +69,15 @@ class DriverHomeScreen extends StatelessWidget {
                   ? 'locationServiceOff'
                   : 'locationPermissionDenied'),
             ),
+          Card(
+            child: SwitchListTile(
+              secondary: const Icon(Icons.my_location),
+              title: Text(l10n.translate('acceptingBids')),
+              subtitle: Text(l10n.translate(driver.isAcceptingBids ? 'acceptingBidsOn' : 'acceptingBidsOff')),
+              value: driver.isAcceptingBids,
+              onChanged: driver.isLoading ? null : driver.setAcceptingBids,
+            ),
+          ),
           for (final invitation in driver.invitations)
             Card(
               child: ListTile(
