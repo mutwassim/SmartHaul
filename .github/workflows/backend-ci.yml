@@ -60,7 +60,8 @@ jobs:
 
       - run: npm run prisma:seed
 
-      - run: npm test
+      - name: Run tests with a coverage summary
+        run: npm test -- --coverage --coverageReporters=text-summary
 
   # ==========================================
   # 2. CD Stage: Automated Deployment to GCP VM
