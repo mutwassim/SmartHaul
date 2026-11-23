@@ -80,8 +80,8 @@ describe('Accepting bids switch (FR-DR-19)', () => {
 
   test('FT-43: invalid coordinates are refused, and a cargo owner cannot use either route', async () => {
     const driver = await verifiedDriver('ft43v');
-    expect((await share(driver, 91, 74)).status).toBe(400);
-    expect((await share(driver, 31, 181)).status).toBe(400);
+    expect((await share(driver, 91, 74)).status).toBe(422);
+    expect((await share(driver, 31, 181)).status).toBe(422);
     const owner = await register('CARGO_OWNER', 'ft43r');
     expect((await request(app).put(`${API}/driver/availability`).set(auth(owner.token)).send({ accepting: false })).status).toBe(403);
     expect((await request(app).post(`${API}/driver/location`).set(auth(owner.token)).send({ latitude: 31, longitude: 74 })).status).toBe(403);

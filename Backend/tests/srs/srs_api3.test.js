@@ -48,7 +48,7 @@ describe('Cancellation and fleet assignment', () => {
   test('FT-13: the cargo owner cancels a Pending and a Booked shipment (reason required); a shipment at Reached Pickup is refused', async () => {
     const owner = await register('CARGO_OWNER', 'ft13o');
     const pendingId = await newShipment(owner);
-    expect((await cancel(owner, pendingId, null)).status).toBe(400);
+    expect((await cancel(owner, pendingId, null)).status).toBe(422);
     expect((await cancel(owner, pendingId)).status).toBe(200);
     expect((await prisma.shipment.findUnique({ where: { id: pendingId } })).status).toBe('CANCELLED');
 
