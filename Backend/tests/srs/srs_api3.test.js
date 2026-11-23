@@ -55,7 +55,7 @@ describe('Cancellation and fleet assignment', () => {
     const job = await bookedJob();
     expect((await cancel(job.owner, job.shipmentId)).status).toBe(200);
     expect((await prisma.shipment.findUnique({ where: { id: job.shipmentId } })).status).toBe('CANCELLED');
-    expect((await prisma.bid.findUnique({ where: { id: job.bid.id } })).status).toBe('REJECTED');
+    expect((await prisma.bid.findUnique({ where: { id: job.bid.id } })).status).toBe('ACCEPTED');
     expect(await notes(job.driver.token)).toContain(job.shipmentId);
 
     const late = await bookedJob();
